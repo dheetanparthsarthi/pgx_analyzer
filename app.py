@@ -1923,69 +1923,39 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             st.markdown("## 1️⃣ Select Pharmacogenetic Target (Gene & Biomarkers)")
             st.caption("Choose which gene and specific biomarker(s) to analyze. Only your selected markers will be uploaded, mapped, and visualized.")
 
-            target_mode = st.radio(
-                "Target Selection Mode:",
-                ["⭐ CYP2C19 Clinical Panel (Default / Featured)", "📚 Full Genomic Catalog (100 Genes & 147 Biomarkers)"],
-                index=0 if st.session_state.get('selected_gene') == 'CYP2C19' else 1,
-                horizontal=True,
-                key="target_mode_radio"
-            )
+            gene_list = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
+            curr_gene = st.session_state.get('selected_gene', 'CYP2C19')
+            if curr_gene not in gene_list:
+                curr_gene = 'CYP2C19' if 'CYP2C19' in gene_list else gene_list[0]
+            g_idx = gene_list.index(curr_gene)
 
-            if "CYP2C19" in target_mode:
-                st.session_state['selected_gene'] = 'CYP2C19'
-                st.markdown("""
-                <div style="background: #FFFFFF; border: 1.5px solid #2563EB; border-radius: 10px; padding: 16px 20px; margin-top: 10px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(37,99,235,0.06);">
-                    <div style="display: flex; align-items: center; justify-content: space-between;">
-                        <span style="font-size: 15px; font-weight: 700; color: #1E3A8A;">🧬 CYP2C19 Antiplatelet & PPI Clinical Panel</span>
-                        <span style="font-size: 11px; font-weight: 700; background: #DBEAFE; color: #1E40AF; padding: 3px 8px; border-radius: 6px;">CPIC Level 1A</span>
-                    </div>
-                    <p style="margin: 6px 0 0 0; font-size: 12px; color: #475569;">
-                        Select which CYP2C19 star alleles to include in this analysis. You can choose 1 marker, 2 markers, or all 3:
-                    </p>
-                </div>
-                """, unsafe_allow_html=True)
-
-                col_cyp1, col_cyp2, col_cyp3 = st.columns(3)
-                with col_cyp1:
-                    cyp2_checked = st.checkbox("CYP2C19*2 (rs4244285 · c.681G>A)", value=any("*2" in m for m in st.session_state.get('selected_markers', [])), key="chk_cyp2")
-                with col_cyp2:
-                    cyp3_checked = st.checkbox("CYP2C19*3 (rs4986893 · c.636G>A)", value=any("*3" in m for m in st.session_state.get('selected_markers', [])), key="chk_cyp3")
-                with col_cyp3:
-                    cyp17_checked = st.checkbox("CYP2C19*17 (rs12248560 · c.-806C>T)", value=any("*17" in m for m in st.session_state.get('selected_markers', [])), key="chk_cyp17")
-
-                chosen_markers = []
-                if cyp2_checked: chosen_markers.append('CYP2C19*2 (rs4244285)')
-                if cyp3_checked: chosen_markers.append('CYP2C19*3 (rs4986893)')
-                if cyp17_checked: chosen_markers.append('CYP2C19*17 (rs12248560)')
-
-                if not chosen_markers:
-                    st.warning("⚠️ Please select at least one marker to continue.")
-                else:
-                    st.session_state['selected_markers'] = chosen_markers
-
-            else:
-                # Browse Full Catalog
-                gene_list = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
-                curr_gene = st.session_state.get('selected_gene', 'CYP2C19')
-                g_idx = gene_list.index(curr_gene) if curr_gene in gene_list else 0
-
-                c_g1, c_g2 = st.columns([1, 1.5])
-                with c_g1:
-                    sel_gene = st.selectbox("Select Target Gene (100 Available):", gene_list, index=g_idx, key="catalog_sel_gene")
+            c_g1, c_g2 = st.columns([1, 1.8])
+            with c_g1:
+                sel_gene = st.selectbox("1️⃣ Select Target Gene:", gene_list, index=g_idx, key="step1_sel_gene")
+                if sel_gene != st.session_state.get('selected_gene'):
                     st.session_state['selected_gene'] = sel_gene
+                    st.session_state['selected_markers'] = []
+                    st.rerun()
 
-                with c_g2:
-                    sub_markers = catalog_df[catalog_df['Gene'] == sel_gene]['Marker'].tolist() if not catalog_df.empty else []
-                    if not sub_markers:
-                        sub_markers = ['rs4244285', 'rs4986893', 'rs12248560'] if sel_gene == 'CYP2C19' else [f"{sel_gene}_marker1"]
+            with c_g2:
+                if sel_gene == 'CYP2C19':
+                    available_markers = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                else:
+                    raw_ms = catalog_df[catalog_df['Gene'] == sel_gene]['Marker'].tolist() if not catalog_df.empty else []
+                    available_markers = raw_ms if raw_ms else [f"{sel_gene}_marker1"]
 
-                    sel_markers = st.multiselect(
-                        f"Select Biomarkers for {sel_gene} (Select 1, 2, or more):",
-                        sub_markers,
-                        default=sub_markers[:min(2, len(sub_markers))],
-                        key="catalog_sel_markers"
-                    )
-                    st.session_state['selected_markers'] = sel_markers
+                curr_selected = st.session_state.get('selected_markers', [])
+                valid_defaults = [m for m in curr_selected if m in available_markers]
+                if not valid_defaults:
+                    valid_defaults = available_markers
+
+                sel_markers = st.multiselect(
+                    f"2️⃣ Select Biomarker(s) for {sel_gene}:",
+                    available_markers,
+                    default=valid_defaults,
+                    key="step1_sel_markers"
+                )
+                st.session_state['selected_markers'] = sel_markers
 
             # Active Target Summary Card
             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
@@ -2306,13 +2276,51 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         # STEP 3: MAP COLUMNS (SHOWS ONLY THE SELECTED MARKERS & ENFORCES GENOTYPE RESTRICTIONS)
         # -------------------------------------------------------------------------
         elif st.session_state['workflow_step'] == '3 · Map columns':
-            st.markdown("## 3️⃣ Map Selected Gene Markers")
-            active_m_list = st.session_state.get('selected_markers', ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)'])
-            active_g = st.session_state.get('selected_gene', 'CYP2C19')
+            st.markdown("## 3️⃣ Map Columns: Gene & Marker Selection")
+            st.caption("First select your target gene and biomarker(s), then map each marker to your spreadsheet columns. (Compulsory metadata fields Sample ID, Gender, and State were confirmed during Upload).")
 
-            st.caption(f"Map detected spreadsheet columns to your selected **{len(active_m_list)}** marker(s) for gene **{active_g}**. (Compulsory metadata fields Sample ID, Gender, and State were confirmed during Upload).")
+            # -------------------------------------------------------------------------
+            # 1. CASCADE DROPDOWNS: SELECT GENE FIRST, THEN SELECT MARKER(S)
+            # -------------------------------------------------------------------------
+            all_catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
+            curr_gene = st.session_state.get('selected_gene', 'CYP2C19')
+            if curr_gene not in all_catalog_genes:
+                curr_gene = 'CYP2C19' if 'CYP2C19' in all_catalog_genes else all_catalog_genes[0]
+            g_idx = all_catalog_genes.index(curr_gene)
 
-            if df_raw is not None and len(df_raw.columns) > 0:
+            c_g1, c_g2 = st.columns([1, 1.8])
+            with c_g1:
+                sel_map_gene = st.selectbox("1️⃣ Select Target Gene:", all_catalog_genes, index=g_idx, key="map_step_gene_sel")
+                if sel_map_gene != st.session_state.get('selected_gene'):
+                    st.session_state['selected_gene'] = sel_map_gene
+                    st.session_state['selected_markers'] = []
+                    st.rerun()
+
+            with c_g2:
+                # Dynamic list of markers for the chosen gene
+                if sel_map_gene == 'CYP2C19':
+                    available_markers = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                else:
+                    raw_ms = catalog_df[catalog_df['Gene'] == sel_map_gene]['Marker'].tolist() if not catalog_df.empty else []
+                    available_markers = raw_ms if raw_ms else [f"{sel_map_gene}_marker1"]
+
+                # Ensure default selections
+                curr_selected = st.session_state.get('selected_markers', [])
+                valid_defaults = [m for m in curr_selected if m in available_markers]
+                if not valid_defaults:
+                    valid_defaults = available_markers
+
+                sel_map_markers = st.multiselect(
+                    f"2️⃣ Select Biomarker(s) for {sel_map_gene}:",
+                    available_markers,
+                    default=valid_defaults,
+                    key="map_step_marker_sel"
+                )
+                st.session_state['selected_markers'] = sel_map_markers
+
+            if not sel_map_markers:
+                st.warning(f"⚠️ Please select at least one biomarker for **{sel_map_gene}** from the dropdown above to map columns.")
+            elif df_raw is not None and len(df_raw.columns) > 0:
                 all_cols = list(df_raw.columns)
                 def find_default(patterns, cols):
                     for pattern in patterns:
@@ -2324,7 +2332,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 mapped_marker_dict = {}
 
                 # Render mapping controls ONLY for the selected markers
-                for idx, marker_label in enumerate(active_m_list):
+                for idx, marker_label in enumerate(sel_map_markers):
                     st.markdown(f"""
                     <div class="clean-card-box">
                         <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">🧬 {marker_label}</h5>
@@ -2505,17 +2513,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
             c_vg1, c_vg2 = st.columns([1, 1.5])
             with c_vg1:
-                vis_gene = st.selectbox("Gene Target (Restricted to Selection):", [active_gene], index=0, key="vis_sel_gene")
+                vis_gene = st.selectbox("Gene Target:", [active_gene], index=0, key="vis_sel_gene")
             with c_vg2:
                 vis_marker = st.selectbox("Biomarker / Variant to Display:", active_markers, key="vis_sel_marker")
-
-            with st.expander("🌐 Browse Other Genes from 100-Gene Knowledgebase Catalog", expanded=False):
-                other_genes = [g for g in sorted(catalog_df['Gene'].unique()) if g != active_gene] if not catalog_df.empty else []
-                if other_genes:
-                    cat_sel = st.selectbox("Select Catalog Gene to Inspect Reference Data:", other_genes, key="cat_sel_inspect")
-                    sub_c = catalog_df[catalog_df['Gene'].str.upper() == cat_sel.upper()]
-                    if not sub_c.empty:
-                        st.dataframe(sub_c[['Gene', 'Marker', 'SA MAF', '%', 'MAF', 'Level of evidence', 'PubMed reference']], use_container_width=True, hide_index=True)
 
             # Extract rsID or clean marker identifier
             clean_rsid = vis_marker
