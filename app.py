@@ -2390,25 +2390,25 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'GA', 'GG', 'AA'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(f"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA** (AG is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
+                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA** (AG is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
                         else:
-                            st.success(f"✅ **Genotype Rule Verified (CYP2C19\*2):** All calls conform to permitted genotypes (`GA`, `GG`, `AA`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
+                            st.success(rf"✅ **Genotype Rule Verified (CYP2C19\*2):** All calls conform to permitted genotypes (`GA`, `GG`, `AA`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
                     elif std_name == 'CYP2C19*3':
                         allowed = {'GG'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.warning(f"⚠️ **Warning for CYP2C19\*3 (rs4986893):** Cohort contains calls other than GG: `{unexpected}` ({sum(counts[u] for u in unexpected)} sample(s)). Standard cohorts require ONLY homozygous wild-type **GG**. If selected, non-GG calls will be flagged as deviations.")
+                            st.warning(rf"⚠️ **Warning for CYP2C19\*3 (rs4986893):** Cohort contains calls other than GG: `{unexpected}` ({sum(counts[u] for u in unexpected)} sample(s)). Standard cohorts require ONLY homozygous wild-type **GG**. If selected, non-GG calls will be flagged as deviations.")
                         else:
-                            st.success(f"✅ **Genotype Rule Verified (CYP2C19\*3):** All {len(norm_calls)} samples have homozygous wild-type `GG` call.")
+                            st.success(rf"✅ **Genotype Rule Verified (CYP2C19\*3):** All {len(norm_calls)} samples have homozygous wild-type `GG` call.")
 
                     elif std_name == 'CYP2C19*17':
                         allowed = {'CC', 'CT', 'TT'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(f"⛔ **Restriction Violation for CYP2C19\*17:** Allowed calls are strictly **CC, CT, TT** (TC is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
+                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*17:** Allowed calls are strictly **CC, CT, TT** (TC is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
                         else:
-                            st.success(f"✅ **Genotype Rule Verified (CYP2C19\*17):** All calls conform to permitted genotypes (`CC`, `CT`, `TT`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
+                            st.success(rf"✅ **Genotype Rule Verified (CYP2C19\*17):** All calls conform to permitted genotypes (`CC`, `CT`, `TT`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
                     else:
                         r_al = ref_val.strip().upper()
@@ -2647,17 +2647,17 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             st.divider()
 
             # Render Full 9-Tab Studio if CYP2C19 was selected and analyzed
-            if vis_gene == 'CYP2C19':
+            if active_gene == 'CYP2C19':
                 st.markdown("### 🧩 Multi-Variant & Demographic Studio (CYP2C19)")
                 render_unified_results(full_results, qc_report)
             else:
-                st.markdown(f"### 📚 Genomic Knowledgebase Markers for {vis_gene}")
-                sub_catalog = catalog_df[catalog_df['Gene'].str.upper() == vis_gene.upper()] if not catalog_df.empty else pd.DataFrame()
+                st.markdown(f"### 📚 Genomic Knowledgebase Markers for {active_gene}")
+                sub_catalog = catalog_df[catalog_df['Gene'].str.upper() == active_gene.upper()] if not catalog_df.empty else pd.DataFrame()
                 if not sub_catalog.empty:
                     disp_cat = sub_catalog[['Gene', 'Marker', 'SA MAF', '%', 'MAF', 'Level of evidence', 'PubMed reference']].copy()
                     st.dataframe(disp_cat, use_container_width=True, hide_index=True)
                 else:
-                    st.info(f"No additional markers recorded for {vis_gene}.")
+                    st.info(f"No additional markers recorded for {active_gene}.")
 
             st.divider()
             st.markdown("### Export")
