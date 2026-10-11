@@ -2357,6 +2357,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     return cols[0] if cols else ""
 
                 mapped_marker_dict = {}
+                mapping_has_errors = False
+
+                # Check for duplicate column selections across markers
+                active_selected_cols = [st.session_state.get(f"w_map_col_{i}") for i in range(len(sel_map_markers))]
+                dup_cols = {c for c in active_selected_cols if c and active_selected_cols.count(c) > 1}
 
                 # Render mapping controls ONLY for the selected markers
                 for idx, marker_label in enumerate(sel_map_markers):
@@ -2365,24 +2370,28 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         std_name = 'CYP2C19*2'
                         ref_opts = ['G']
                         var_opts = ['A']
-                        ref_help = "Curated wild-type reference allele (G) for CYP2C19*2"
-                        var_help = "Curated variant allele (A) for CYP2C19*2"
+                        is_locked = True
+                        ref_help = "Standard wild-type reference allele (G) for CYP2C19*2 (locked)"
+                        var_help = "Standard variant allele (A) for CYP2C19*2 (locked)"
                     elif "*3" in marker_label or "rs4986893" in marker_label:
                         std_name = 'CYP2C19*3'
                         ref_opts = ['G']
                         var_opts = ['A']
-                        ref_help = "Curated wild-type reference allele (G) for CYP2C19*3"
-                        var_help = "Curated variant allele (A) for CYP2C19*3"
+                        is_locked = True
+                        ref_help = "Standard wild-type reference allele (G) for CYP2C19*3 (locked)"
+                        var_help = "Standard variant allele (A) for CYP2C19*3 (locked)"
                     elif "*17" in marker_label or "rs12248560" in marker_label:
                         std_name = 'CYP2C19*17'
                         ref_opts = ['C']
                         var_opts = ['T']
-                        ref_help = "Curated wild-type reference allele (C) for CYP2C19*17"
-                        var_help = "Curated variant allele (T) for CYP2C19*17"
+                        is_locked = True
+                        ref_help = "Standard wild-type reference allele (C) for CYP2C19*17 (locked)"
+                        var_help = "Standard variant allele (T) for CYP2C19*17 (locked)"
                     else:
                         std_name = marker_label.split(' ')[0]
                         ref_opts = ['A', 'C', 'G', 'T']
                         var_opts = ['A', 'C', 'G', 'T']
+                        is_locked = False
                         ref_help = f"Select reference allele for {marker_label}"
                         var_help = f"Select variant allele for {marker_label}"
 
@@ -2408,11 +2417,23 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     def_idx = genotype_cols.index(m_def) if m_def in genotype_cols else min(idx % len(genotype_cols), len(genotype_cols) - 1)
 
                     sel_col = c1_m.selectbox("Genotype column", genotype_cols, index=def_idx, key=f"w_map_col_{idx}", help="Select spreadsheet column containing calls for this marker")
-                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=f"w_map_ref_{idx}", help=ref_help)
-                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0 if len(var_opts) == 1 else 1, key=f"w_map_var_{idx}", help=var_help)
+                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, disabled=is_locked, key=f"w_map_ref_{idx}", help=ref_help)
+                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0 if len(var_opts) == 1 else 1, disabled=is_locked, key=f"w_map_var_{idx}", help=var_help)
 
-                    if sel_col in mapped_marker_dict:
-                        st.error(f"⚠️ Column `{sel_col}` is already mapped to `{mapped_marker_dict[sel_col]['marker_label']}`. Please select distinct genotype columns.")
+                    # 1. Check for Duplicate Column Mapping
+                    if sel_col in dup_cols:
+                        st.error(f"⛔ **Duplicate Column Conflict:** Spreadsheet column `{sel_col}` is mapped to multiple markers! Each biomarker must be mapped to a distinct column.")
+                        mapping_has_errors = True
+
+                    # 2. Check for Marker-Column Mismatch
+                    is_name_match = (
+                        (std_name == 'CYP2C19*2' and ('*2' in str(sel_col) or 'rs4244285' in str(sel_col).lower() or 'c.681' in str(sel_col).lower())) or
+                        (std_name == 'CYP2C19*3' and ('*3' in str(sel_col) or 'rs4986893' in str(sel_col).lower() or 'c.636' in str(sel_col).lower())) or
+                        (std_name == 'CYP2C19*17' and ('*17' in str(sel_col) or 'rs12248560' in str(sel_col).lower() or 'c.-806' in str(sel_col).lower())) or
+                        (std_name not in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] and std_name.lower() in str(sel_col).lower())
+                    )
+                    if not is_name_match:
+                        st.warning(f"⚠️ **Column Mismatch Warning:** Selected column `{sel_col}` does not appear to match marker **{marker_label}**. Please verify that you selected the correct column.")
 
                     mapped_marker_dict[sel_col] = {
                         'std_name': std_name,
@@ -2436,7 +2457,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'GA', 'GG', 'AA'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA** (AG is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
+                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA** (AG is invalid). Detected invalid call(s): `{unexpected}`. Selected column does not contain valid CYP2C19*2 genotypes.")
+                            mapping_has_errors = True
+                        elif 'GA' not in counts and 'AA' not in counts and len(counts) > 0 and 'GG' in counts:
+                            st.warning(rf"⚠️ **Genotype Check for CYP2C19\*2:** Column `{sel_col}` contains only homozygous wild-type `GG` (no GA or AA variant calls detected). Please verify whether this is the CYP2C19*3 column instead.")
                         else:
                             st.success(rf"✅ **Genotype Rule Verified (CYP2C19\*2):** All calls conform to permitted genotypes (`GA`, `GG`, `AA`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
@@ -2444,7 +2468,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'GG'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.warning(rf"⚠️ **Warning for CYP2C19\*3 (rs4986893):** Cohort contains calls other than GG: `{unexpected}` ({sum(counts[u] for u in unexpected)} sample(s)). Standard cohorts require ONLY homozygous wild-type **GG**. If selected, non-GG calls will be flagged as deviations.")
+                            st.warning(rf"⚠️ **Deviation / Check for CYP2C19\*3 (rs4986893):** Cohort contains calls other than homozygous wild-type GG: `{unexpected}` ({sum(counts[u] for u in unexpected)} sample(s)). Standard cohorts require homozygous wild-type **GG**. If selected by mistake, please select the correct column.")
                         else:
                             st.success(rf"✅ **Genotype Rule Verified (CYP2C19\*3):** All {len(norm_calls)} samples have homozygous wild-type `GG` call.")
 
@@ -2452,19 +2476,24 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'CC', 'CT', 'TT'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*17:** Allowed calls are strictly **CC, CT, TT** (TC is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
+                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*17:** Allowed calls are strictly **CC, CT, TT** (TC is invalid). Detected invalid call(s): `{unexpected}`. Selected column does not contain valid CYP2C19*17 (C/T) calls.")
+                            mapping_has_errors = True
                         else:
                             st.success(rf"✅ **Genotype Rule Verified (CYP2C19\*17):** All calls conform to permitted genotypes (`CC`, `CT`, `TT`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
                     else:
                         r_al = ref_val.strip().upper()
                         v_al = var_val.strip().upper()
-                        allowed = {r_al + r_al, r_al + v_al, v_al + v_al}
-                        unexpected = [k for k in counts.keys() if k not in allowed]
-                        if unexpected:
-                            st.warning(f"⚠️ **Genotype Notice ({marker_label}):** Expected genotypes based on Ref ({r_al}) & Var ({v_al}) are {sorted(list(set([r_al+r_al, r_al+v_al, v_al+v_al])))}. Detected other calls: `{unexpected}`.")
+                        if r_al == v_al:
+                            st.error(f"⛔ Reference allele ({r_al}) and Variant allele ({v_al}) cannot be identical.")
+                            mapping_has_errors = True
                         else:
-                            st.success(f"✅ **Genotype Rule Verified ({marker_label}):** Observed calls match Ref ({r_al}) & Var ({v_al}): " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
+                            allowed = {r_al + r_al, r_al + v_al, v_al + v_al}
+                            unexpected = [k for k in counts.keys() if k not in allowed]
+                            if unexpected:
+                                st.warning(f"⚠️ **Genotype Notice ({marker_label}):** Expected genotypes based on Ref ({r_al}) & Var ({v_al}) are {sorted(list(set([r_al+r_al, r_al+v_al, v_al+v_al])))}. Detected other calls: `{unexpected}`.")
+                            else:
+                                st.success(f"✅ **Genotype Rule Verified ({marker_label}):** Observed calls match Ref ({r_al}) & Var ({v_al}): " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 c_b1, c_b2, c_b3 = st.columns([0.25, 0.5, 0.25])
@@ -2473,7 +2502,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         st.session_state['workflow_step'] = '2 · Upload'
                         st.rerun()
                 with c_b3:
-                    if st.button("Continue to Results →", type="primary", use_container_width=True, key="btn_map_cont"):
+                    if mapping_has_errors:
+                        st.button("Continue to Results →", type="primary", disabled=True, use_container_width=True, key="btn_map_cont_dis", help="Resolve column mapping errors above to proceed")
+                    elif st.button("Continue to Results →", type="primary", use_container_width=True, key="btn_map_cont"):
                         # BUILD FINAL MAPPING WITH CONFIRMED METADATA & MARKERS
                         final_mapping = {}
                         demo = st.session_state.get('demographic_mapping', {})
