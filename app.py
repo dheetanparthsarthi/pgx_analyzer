@@ -2373,8 +2373,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     
                     def norm_gt(v):
                         clean_v = v.replace('/', '').replace('|', '').replace(' ', '')
-                        if clean_v in ['AG', 'GA']: return 'GA'
-                        if clean_v in ['CT', 'TC']: return 'CT'
                         return clean_v
 
                     norm_calls = valid_s.map(norm_gt)
@@ -2384,7 +2382,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'GA', 'GG', 'AA'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(f"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA**. Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
+                            st.error(f"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA** (AG is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
                         else:
                             st.success(f"✅ **Genotype Rule Verified (CYP2C19\*2):** All calls conform to permitted genotypes (`GA`, `GG`, `AA`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
@@ -2400,14 +2398,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'CC', 'CT', 'TT'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(f"⛔ **Restriction Violation for CYP2C19\*17:** Allowed calls are strictly **CC, CT, TT**. Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
+                            st.error(f"⛔ **Restriction Violation for CYP2C19\*17:** Allowed calls are strictly **CC, CT, TT** (TC is invalid). Detected invalid call(s): `{unexpected}`. Non-standard calls will be excluded from valid data.")
                         else:
                             st.success(f"✅ **Genotype Rule Verified (CYP2C19\*17):** All calls conform to permitted genotypes (`CC`, `CT`, `TT`). Observed: " + ", ".join([f"**{k}** ({v})" for k, v in sorted(counts.items())]))
 
                     else:
                         r_al = ref_val.strip().upper()
                         v_al = var_val.strip().upper()
-                        allowed = {r_al + r_al, r_al + v_al, v_al + r_al, v_al + v_al}
+                        allowed = {r_al + r_al, r_al + v_al, v_al + v_al}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
                             st.warning(f"⚠️ **Genotype Notice ({marker_label}):** Expected genotypes based on Ref ({r_al}) & Var ({v_al}) are {sorted(list(set([r_al+r_al, r_al+v_al, v_al+v_al])))}. Detected other calls: `{unexpected}`.")
@@ -2451,8 +2449,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                             def clean_cyp2(v):
                                                 if pd.isna(v): return np.nan
                                                 clean = str(v).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
-                                                if clean in ['AG', 'GA']: return 'GA'
-                                                if clean in ['GG', 'AA']: return clean
+                                                if clean in ['GA', 'GG', 'AA']: return clean
                                                 return np.nan
                                             filtered_df[m_col] = filtered_df[m_col].apply(clean_cyp2)
                                         elif s_name == 'CYP2C19*3':
@@ -2466,8 +2463,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                             def clean_cyp17(v):
                                                 if pd.isna(v): return np.nan
                                                 clean = str(v).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
-                                                if clean in ['CT', 'TC']: return 'CT'
-                                                if clean in ['CC', 'TT']: return clean
+                                                if clean in ['CC', 'CT', 'TT']: return clean
                                                 return np.nan
                                             filtered_df[m_col] = filtered_df[m_col].apply(clean_cyp17)
                                         else:

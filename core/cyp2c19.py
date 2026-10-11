@@ -25,9 +25,9 @@ class CYP2C19Translator:
             return 'Indeterminate', 'Indeterminate'
             
         # Count variant alleles for *2 (GA=1, AA=2), *3 (GA=1, AA=2), *17 (CT=1, TT=2)
-        star2_count = 2 if g_cyp2 == 'AA' else (1 if g_cyp2 in ['GA', 'AG'] else 0)
-        star3_count = 2 if g_cyp3 == 'AA' else (1 if g_cyp3 in ['GA', 'AG'] else 0)
-        star17_count = 2 if g_cyp17 == 'TT' else (1 if g_cyp17 in ['CT', 'TC'] else 0)
+        star2_count = 2 if g_cyp2 == 'AA' else (1 if g_cyp2 == 'GA' else 0)
+        star3_count = 2 if g_cyp3 == 'AA' else (1 if g_cyp3 == 'GA' else 0)
+        star17_count = 2 if g_cyp17 == 'TT' else (1 if g_cyp17 == 'CT' else 0)
         
         # Diplotype calling rules
         if star2_count == 2:

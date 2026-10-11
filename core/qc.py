@@ -131,8 +131,6 @@ class DataQCEngine:
                     v = str(val).strip().upper().replace('/', '')
                     if v in ['', 'NAN', 'NONE', 'NULL', 'NA', '?']:
                         return np.nan
-                    if v in ['AG', 'GA']: v = 'GA'
-                    if v in ['CT', 'TC']: v = 'CT'
                     
                     if v in snp_info['valid_genotypes']:
                         return v
