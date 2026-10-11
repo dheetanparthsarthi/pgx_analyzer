@@ -2459,25 +2459,16 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         badge_detail = f"Map matching spreadsheet column and alleles for {marker_label}"
                         matching_cols = [c for c in genotype_cols if std_name.lower() in str(c).lower()]
 
-                    # Fallback to general find_default if specific matching finds nothing
-                    best_match = matching_cols[0] if matching_cols else find_default([marker_label, std_name], genotype_cols)
+                    # Restrict genotype column drag-down strictly to matching genotype column(s) for this marker
+                    if matching_cols:
+                        col_options = matching_cols
+                    else:
+                        # Only genotype columns (strictly exclude metadata and demographics)
+                        col_options = genotype_cols
 
-                    # Fully flexible column options from the input data:
-                    # Best-matching column is placed first as the default, followed by all candidate genotype columns
-                    # and all spreadsheet columns from df_raw so the user has full flexibility along the input data
-                    flexible_cols = []
-                    if best_match and best_match in genotype_cols:
-                        flexible_cols.append(best_match)
-                    for c in genotype_cols:
-                        if c not in flexible_cols:
-                            flexible_cols.append(c)
-                    for c in all_cols:
-                        if not str(c).strip().startswith('Unnamed:') and c not in flexible_cols:
-                            flexible_cols.append(c)
+                    best_match = matching_cols[0] if matching_cols else find_default([marker_label, std_name], col_options)
 
-                    col_options = flexible_cols if flexible_cols else all_cols
-
-                    # Sanitize session state keys if options changed
+                    # Sanitize session state keys: strictly reset if current selection does not belong to this marker's options
                     col_key = f"w_map_col_{idx}"
                     if col_key not in st.session_state or st.session_state[col_key] not in col_options:
                         st.session_state[col_key] = best_match if (best_match and best_match in col_options) else col_options[0]
@@ -2485,11 +2476,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     def_col_idx = col_options.index(st.session_state[col_key]) if st.session_state[col_key] in col_options else 0
 
                     ref_key = f"w_map_ref_{idx}"
-                    if ref_key in st.session_state and st.session_state[ref_key] not in ref_opts:
+                    if ref_key not in st.session_state or st.session_state[ref_key] not in ref_opts:
                         st.session_state[ref_key] = ref_opts[0]
 
                     var_key = f"w_map_var_{idx}"
-                    if var_key in st.session_state and st.session_state[var_key] not in var_opts:
+                    if var_key not in st.session_state or st.session_state[var_key] not in var_opts:
                         st.session_state[var_key] = var_opts[0]
 
                     st.markdown(f"""
@@ -2505,7 +2496,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     """, unsafe_allow_html=True)
                     
                     c1_m, c2_m, c3_m = st.columns(3)
-                    sel_col = c1_m.selectbox("Genotype column", col_options, index=def_col_idx, key=col_key, help=f"Select spreadsheet column from input data for {marker_label}")
+                    sel_col = c1_m.selectbox("Genotype column", col_options, index=def_col_idx, key=col_key, help=f"Genotype column for {marker_label}")
                     ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=ref_key, help=ref_help)
                     var_val = c3_m.selectbox("Variant allele", var_opts, index=0, key=var_key, help=var_help)
 
