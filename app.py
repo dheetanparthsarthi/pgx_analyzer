@@ -2459,18 +2459,30 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         badge_detail = f"Map matching spreadsheet column and alleles for {marker_label}"
                         matching_cols = [c for c in genotype_cols if std_name.lower() in str(c).lower()]
 
-                    # Fallback to general find_default or genotype_cols if specific matching finds nothing
-                    if not matching_cols:
-                        m_def = find_default([marker_label, std_name], genotype_cols)
-                        if m_def in genotype_cols:
-                            matching_cols = [m_def]
-                    
-                    col_options = matching_cols if matching_cols else genotype_cols
+                    # Fallback to general find_default if specific matching finds nothing
+                    best_match = matching_cols[0] if matching_cols else find_default([marker_label, std_name], genotype_cols)
+
+                    # Fully flexible column options from the input data:
+                    # Best-matching column is placed first as the default, followed by all candidate genotype columns
+                    # and all spreadsheet columns from df_raw so the user has full flexibility along the input data
+                    flexible_cols = []
+                    if best_match and best_match in genotype_cols:
+                        flexible_cols.append(best_match)
+                    for c in genotype_cols:
+                        if c not in flexible_cols:
+                            flexible_cols.append(c)
+                    for c in all_cols:
+                        if not str(c).strip().startswith('Unnamed:') and c not in flexible_cols:
+                            flexible_cols.append(c)
+
+                    col_options = flexible_cols if flexible_cols else all_cols
 
                     # Sanitize session state keys if options changed
                     col_key = f"w_map_col_{idx}"
-                    if col_key in st.session_state and st.session_state[col_key] not in col_options:
-                        st.session_state[col_key] = col_options[0]
+                    if col_key not in st.session_state or st.session_state[col_key] not in col_options:
+                        st.session_state[col_key] = best_match if (best_match and best_match in col_options) else col_options[0]
+
+                    def_col_idx = col_options.index(st.session_state[col_key]) if st.session_state[col_key] in col_options else 0
 
                     ref_key = f"w_map_ref_{idx}"
                     if ref_key in st.session_state and st.session_state[ref_key] not in ref_opts:
@@ -2493,7 +2505,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     """, unsafe_allow_html=True)
                     
                     c1_m, c2_m, c3_m = st.columns(3)
-                    sel_col = c1_m.selectbox("Genotype column", col_options, index=0, key=col_key, help=f"Matching spreadsheet column for {marker_label}")
+                    sel_col = c1_m.selectbox("Genotype column", col_options, index=def_col_idx, key=col_key, help=f"Select spreadsheet column from input data for {marker_label}")
                     ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=ref_key, help=ref_help)
                     var_val = c3_m.selectbox("Variant allele", var_opts, index=0, key=var_key, help=var_help)
 
@@ -2520,12 +2532,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         'marker_label': marker_label
                     }
 
-                    # LIVE GENOTYPE RESTRICTION & VALIDATION CHECK
+                    # LIVE GENOTYPE RESTRICTION & VALIDATION CHECK ALONG INPUT DATA
                     raw_s = df_raw[sel_col].dropna().astype(str).str.strip().str.upper()
                     valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
                     
                     def norm_gt(v):
                         clean_v = v.replace('/', '').replace('|', '').replace(' ', '')
+                        if clean_v == 'AG': clean_v = 'GA'
+                        if clean_v == 'TC': clean_v = 'CT'
                         return clean_v
 
                     norm_calls = valid_s.map(norm_gt)
@@ -2535,7 +2549,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         allowed = {'GA', 'GG', 'AA'}
                         unexpected = [k for k in counts.keys() if k not in allowed]
                         if unexpected:
-                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are strictly **GA, GG, AA** (AG is invalid). Detected invalid call(s): `{unexpected}`. Selected column does not contain valid CYP2C19*2 genotypes.")
+                            st.error(rf"⛔ **Restriction Violation for CYP2C19\*2:** Allowed calls are **GA, GG, AA**. Detected invalid call(s): `{unexpected}`. Selected column does not contain valid CYP2C19*2 genotypes.")
                             mapping_has_errors = True
                         elif 'GA' not in counts and 'AA' not in counts and len(counts) > 0 and 'GG' in counts:
                             st.warning(rf"⚠️ **Genotype Check for CYP2C19\*2:** Column `{sel_col}` contains only homozygous wild-type `GG` (no GA or AA variant calls detected). Please verify whether this is the CYP2C19*3 column instead.")
