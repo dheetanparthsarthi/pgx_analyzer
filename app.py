@@ -1280,7 +1280,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                         'TYPE': get_allele_type(k, snp_code),
                         'COUNT': v, 
                         'FREQUENCY': f"{a_p.get(k, 0):.1f}%"
-                    } for k, v in a_c.items() if v > 0]
+                    } for k, v in a_c.items()]
                     st.table(pd.DataFrame(al_rows))
                     
                 with c_fig:
@@ -1294,7 +1294,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     fig_bar.update_layout(height=220, margin=dict(l=20, r=20, t=35, b=20))
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                    al_df = pd.DataFrame([{'Allele': k, 'Frequency (%)': a_p.get(k, 0)} for k, v in a_c.items() if v > 0])
+                    al_df = pd.DataFrame([{'Allele': k, 'Frequency (%)': a_p.get(k, 0)} for k, v in a_c.items()])
                     fig_al = px.bar(
                         al_df, x='Allele', y='Frequency (%)',
                         title=f"{snp_code} Allele Frequencies ({sel_key})",
