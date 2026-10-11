@@ -2323,13 +2323,34 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             elif df_raw is not None and len(df_raw.columns) > 0:
                 all_cols = list(df_raw.columns)
                 demo_mapping = st.session_state.get('demographic_mapping', {})
-                confirmed_demo_cols = {v for k, v in demo_mapping.items() if v}
+                confirmed_demo_cols = {str(v).strip().lower() for k, v in demo_mapping.items() if v}
+                cur_insp = st.session_state.get('upload_inspection', {})
+                if cur_insp:
+                    for k in ['sample_id_col', 'gender_col', 'state_col']:
+                        if cur_insp.get(k):
+                            confirmed_demo_cols.add(str(cur_insp[k]).strip().lower())
 
-                # Clean candidate genotype columns (exclude unnamed Excel columns & confirmed metadata)
-                genotype_cols = [
-                    c for c in all_cols 
-                    if not str(c).strip().startswith('Unnamed:') and c not in confirmed_demo_cols
+                NON_GENOTYPE_KEYWORDS = [
+                    'sample', 'id', 'gender', 'sex', 'state', 'region', 'place', 
+                    'date', 'birth', 'dob', 'test', 'family', 'generation', 'native', 
+                    'unnamed', 'patient', 'name', 'age', 'center', 'hospital', 'clinic', 'india'
                 ]
+
+                def is_demographic_or_metadata(col_name: str) -> bool:
+                    clean = str(col_name).strip().lower()
+                    if clean.startswith('unnamed:'):
+                        return True
+                    if clean in confirmed_demo_cols:
+                        return True
+                    has_marker_symbol = any(sym in clean for sym in ['*', 'rs', 'cyp', 'dpyd', 'tpmt', 'vkorc', 'nudt', 'ugt', 'slco', 'hla', 'g6pd'])
+                    if not has_marker_symbol:
+                        for kw in NON_GENOTYPE_KEYWORDS:
+                            if kw in clean:
+                                return True
+                    return False
+
+                # Clean candidate genotype columns (strictly exclude metadata, demographics, and unnamed columns)
+                genotype_cols = [c for c in all_cols if not is_demographic_or_metadata(c)]
                 if not genotype_cols:
                     genotype_cols = [c for c in all_cols if not str(c).strip().startswith('Unnamed:')]
                 if not genotype_cols:
