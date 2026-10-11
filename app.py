@@ -349,13 +349,70 @@ if not st.session_state.get('is_deleted', False) and (st.session_state['uploaded
     persisted_df = load_persisted_dataset()
     if persisted_df is not None and len(persisted_df) > 0:
         st.session_state['uploaded_df'] = persisted_df
-        if 'workflow_step' not in st.session_state or st.session_state['workflow_step'] == '1 · Upload':
-            st.session_state['workflow_step'] = '3 · Results'
+        if 'workflow_step' not in st.session_state:
+            st.session_state['workflow_step'] = '1 · Upload'
 
 if st.session_state['uploaded_df'] is None:
     st.session_state['uploaded_df'] = pd.DataFrame(columns=EMPTY_COLS)
 
 db_manager = DatabaseManager()
+
+def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
+    """Finds best matching column for a given gene/SNP/demographic in a dataframe."""
+    if df is None or df.empty:
+        return None
+    cols = list(df.columns)
+    
+    patterns = {
+        'CYP2C19*2': ['*2', 'cyp2c19*2', 'rs4244285', 'c.681g>a', 'c.681', 'cyp2c19_2', 'cyp2'],
+        'CYP2C19*3': ['*3', 'cyp2c19*3', 'rs4986893', 'c.636g>a', 'c.636', 'cyp2c19_3', 'cyp3'],
+        'CYP2C19*17': ['*17', 'cyp2c19*17', 'rs12248560', 'c.-806c>t', 'c.-806', 'cyp2c19_17', 'cyp17'],
+        'Sample_ID': ['sample id', 'sample_id', 'sample', 'patient id', 'patient_id', 'id'],
+        'Gender': ['gender', 'sex'],
+        'State': ['state', 'region', 'native place', 'native', 'location'],
+        'DOB': ['date of birth', 'dob', 'birth']
+    }
+    
+    target_patterns = patterns.get(target_key, [])
+    for p in target_patterns:
+        for c in cols:
+            c_clean = str(c).lower().replace(" ", "").replace("_", "").replace("-", "")
+            p_clean = p.lower().replace(" ", "").replace("_", "").replace("-", "")
+            if p_clean in c_clean:
+                return c
+    return None
+
+def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Intelligently aligns gene and demographic columns between base_df and new_df
+    before concatenating to ensure genotypes merge into the exact correct gene columns.
+    """
+    if base_df is None or base_df.empty:
+        return new_df.copy(), ["Base dataset empty; adopted newly uploaded dataset."]
+    if new_df is None or new_df.empty:
+        return base_df.copy(), ["New dataset empty; retained current base dataset."]
+
+    new_aligned = new_df.copy()
+    alignment_log = []
+    rename_dict = {}
+
+    target_keys = ['Sample_ID', 'CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17', 'Gender', 'State', 'DOB']
+
+    for key in target_keys:
+        base_match = find_matching_gene_column(key, base_df)
+        new_match = find_matching_gene_column(key, new_aligned)
+
+        if base_match and new_match and base_match != new_match:
+            rename_dict[new_match] = base_match
+            alignment_log.append(f"🧬 **{key}**: Aligned new column `{new_match}` ➔ existing column `{base_match}`")
+        elif base_match and new_match and base_match == new_match:
+            alignment_log.append(f"✅ **{key}**: Identical column `{base_match}` matched")
+
+    if rename_dict:
+        new_aligned = new_aligned.rename(columns=rename_dict)
+
+    merged_df = pd.concat([base_df, new_aligned], ignore_index=True)
+    return merged_df, alignment_log
 
 def clear_deletion_flag():
     """Clears the disk-based permanent deletion marker file and purges cache."""
@@ -377,6 +434,10 @@ def reset_all_data():
     st.session_state['mapped_cols'] = {}
     st.session_state['datasets_dict'] = {}
     st.session_state['last_uploaded_file_id'] = None
+    st.session_state['pending_new_df'] = None
+    st.session_state['pending_file_id'] = None
+    st.session_state['pending_file_name'] = None
+    st.session_state['merge_alignment_log'] = None
     st.session_state['show_delete_confirm'] = False
     st.session_state['workflow_step'] = '1 · Upload'
     
@@ -1707,6 +1768,20 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             </div>
             """, unsafe_allow_html=True)
 
+            # Display active workspace status if data is loaded
+            if has_active_data():
+                c_status, c_act1, c_act2 = st.columns([1.4, 0.8, 0.8])
+                with c_status:
+                    st.info(f"📂 **Active Workspace Data:** `{len(df_raw):,} samples` loaded.")
+                with c_act1:
+                    if st.button("📊 View Current Results →", use_container_width=True, key="btn_step1_quick_res"):
+                        st.session_state['workflow_step'] = '3 · Results'
+                        st.rerun()
+                with c_act2:
+                    if st.button("🗑️ Delete & Clear Data", use_container_width=True, key="btn_step1_quick_del"):
+                        reset_all_data()
+                        st.rerun()
+
             file_upload = st.file_uploader("Select dataset file", type=["xlsx", "xls", "csv"], key="w_step1_uploader", label_visibility="collapsed")
             if file_upload is not None:
                 uploaded_file_id = f"{file_upload.name}_{file_upload.size}"
@@ -1728,63 +1803,76 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.session_state['uploaded_df'] = df_load
                             st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
                             st.session_state['mapped_cols'] = {}
-                            st.session_state['workflow_step'] = '2 · Map columns'
+                            st.session_state['workflow_step'] = '1 · Upload'
                             save_active_dataset(df_load)
-                            st.success(f"Loaded: {file_upload.name} ({len(df_load):,} samples). Please map columns below.")
+                            st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns). Review below and click 'Continue to Map Columns →'.")
                             st.rerun()
                     except Exception as e:
                         st.error(f"Error loading file: {e}")
 
             if st.session_state.get('pending_new_df') is not None:
-                st.info("⚠️ **An active dataset is already loaded in your workspace!** How would you like to process this new dataset file?")
+                pending_df = st.session_state['pending_new_df']
+                pending_fname = st.session_state.get('pending_file_name', 'Uploaded File')
+                st.warning(f"⚠️ **An active dataset is already loaded ({len(st.session_state['uploaded_df']):,} samples).**\n\nHow would you like to process new file **{pending_fname}** ({len(pending_df):,} samples)?")
+                
                 c_mrg1, c_mrg2, c_mrg3 = st.columns(3)
                 with c_mrg1:
                     if st.button("🔄 Merge with Active Dataset", type="primary", use_container_width=True, key="btn_merge_dataset"):
-                        merged_df = pd.concat([st.session_state['uploaded_df'], st.session_state['pending_new_df']], ignore_index=True)
+                        base_df = st.session_state['uploaded_df']
+                        merged_df, align_log = smart_merge_datasets(base_df, pending_df)
                         clear_deletion_flag()
                         st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
                         st.session_state['uploaded_df'] = merged_df
                         st.session_state.setdefault('datasets_dict', {})['Master Merged Dataset'] = merged_df
+                        st.session_state['merge_alignment_log'] = align_log
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
-                        st.session_state['workflow_step'] = '2 · Map columns'
+                        st.session_state['workflow_step'] = '1 · Upload'
                         save_active_dataset(merged_df)
-                        st.success("Merged new dataset with active dataset! Move to Step 2 to review column mappings.")
+                        st.success(f"✅ Successfully merged {len(pending_df):,} samples! Total dataset now contains {len(merged_df):,} samples.")
                         st.rerun()
                 with c_mrg2:
                     if st.button("📁 Keep as Separate Dataset", type="primary", use_container_width=True, key="btn_separate_dataset"):
-                        new_df = st.session_state['pending_new_df']
-                        fname = st.session_state.get('pending_file_name', 'New File')
                         clear_deletion_flag()
                         st.session_state.setdefault('datasets_dict', {})[f"Dataset 1 (Active)"] = st.session_state['uploaded_df']
-                        st.session_state['datasets_dict'][f"Dataset 2 ({fname})"] = new_df
+                        st.session_state['datasets_dict'][f"Dataset 2 ({pending_fname})"] = pending_df
                         st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
-                        st.session_state['uploaded_df'] = new_df
+                        st.session_state['uploaded_df'] = pending_df
                         st.session_state['mapped_cols'] = {}
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
-                        st.session_state['workflow_step'] = '2 · Map columns'
-                        save_active_dataset(new_df)
-                        st.success(f"Added '{fname}' as a separate dataset for independent calculation! Move to Step 2 to review column mappings.")
+                        st.session_state['workflow_step'] = '1 · Upload'
+                        save_active_dataset(pending_df)
+                        st.success(f"📁 Added '{pending_fname}' as a separate dataset for independent analysis!")
                         st.rerun()
                 with c_mrg3:
                     if st.button("🆕 Replace Active Dataset", type="secondary", use_container_width=True, key="btn_replace_dataset"):
-                        new_df = st.session_state['pending_new_df']
-                        fname = st.session_state.get('pending_file_name', 'New File')
                         clear_deletion_flag()
                         st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
-                        st.session_state['uploaded_df'] = new_df
-                        st.session_state['datasets_dict'] = {f"Active Dataset ({fname})": new_df}
+                        st.session_state['uploaded_df'] = pending_df
+                        st.session_state['datasets_dict'] = {f"Active Dataset ({pending_fname})": pending_df}
                         st.session_state['mapped_cols'] = {}
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
-                        st.session_state['workflow_step'] = '2 · Map columns'
-                        save_active_dataset(new_df)
-                        st.success("Replaced active dataset with new file! Move to Step 2 to review column mappings.")
+                        st.session_state['workflow_step'] = '1 · Upload'
+                        save_active_dataset(pending_df)
+                        st.success(f"🆕 Replaced active workspace with '{pending_fname}' ({len(pending_df):,} samples).")
                         st.rerun()
+
+            # Show Gene Alignment Log if merge occurred
+            if st.session_state.get('merge_alignment_log'):
+                with st.expander("🧬 Gene & Column Alignment Verification Log", expanded=True):
+                    for log_entry in st.session_state['merge_alignment_log']:
+                        st.markdown(f"• {log_entry}")
+
+            # Show active dataset preview if loaded
+            if has_active_data():
+                st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                st.markdown(f"##### 📋 Active Dataset Preview ({len(df_raw):,} samples, {len(df_raw.columns)} columns):")
+                st.dataframe(df_raw.head(5), use_container_width=True)
 
             st.markdown("""
             <div class="privacy-info-banner">
@@ -1792,11 +1880,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             </div>
             """, unsafe_allow_html=True)
 
-            c_space, c_next = st.columns([0.75, 0.25])
+            c_space, c_next = st.columns([0.7, 0.3])
             with c_next:
-                if st.button("Continue →", type="primary", use_container_width=True, key="btn_step1_cont"):
-                    st.session_state['workflow_step'] = '2 · Map columns'
-                    st.rerun()
+                if st.button("Continue to Map Columns →", type="primary", use_container_width=True, key="btn_step1_cont"):
+                    if has_active_data():
+                        st.session_state['workflow_step'] = '2 · Map columns'
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Please upload a dataset file (.xlsx/.csv) before proceeding to column mapping.")
 
             st.divider()
 
