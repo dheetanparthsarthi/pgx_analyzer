@@ -2373,11 +2373,20 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             </div>
             """, unsafe_allow_html=True)
 
+            all_catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
+            def_idx = all_catalog_genes.index(active_gene) if active_gene in all_catalog_genes else 0
+
             c_vg1, c_vg2 = st.columns([1, 1.5])
             with c_vg1:
-                vis_gene = st.selectbox("Gene Target:", [active_gene], key="vis_sel_gene")
+                vis_gene = st.selectbox("Gene Target (100 Genes Available):", all_catalog_genes, index=def_idx, key="vis_sel_gene")
             with c_vg2:
-                vis_marker = st.selectbox("Biomarker / Variant to Display:", active_markers, key="vis_sel_marker")
+                if vis_gene == active_gene and active_markers:
+                    gene_marker_options = active_markers
+                else:
+                    raw_ms = catalog_df[catalog_df['Gene'] == vis_gene]['Marker'].tolist() if not catalog_df.empty else []
+                    gene_marker_options = raw_ms if raw_ms else [f"{vis_gene}_marker"]
+
+                vis_marker = st.selectbox("Biomarker / Variant to Display:", gene_marker_options, key="vis_sel_marker")
 
             # Extract rsID or clean marker identifier
             clean_rsid = vis_marker
@@ -2391,10 +2400,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             # Lookup reference metrics in catalog_df
             ref_row = None
             if not catalog_df.empty:
-                matches = catalog_df[(catalog_df['Gene'].str.upper() == active_gene.upper()) & 
+                matches = catalog_df[(catalog_df['Gene'].str.upper() == vis_gene.upper()) & 
                                      (catalog_df['Marker'].str.contains(clean_rsid, case=False, na=False))]
                 if matches.empty:
-                    matches = catalog_df[catalog_df['Gene'].str.upper() == active_gene.upper()]
+                    matches = catalog_df[catalog_df['Gene'].str.upper() == vis_gene.upper()]
                 if not matches.empty:
                     ref_row = matches.iloc[0]
 
@@ -2404,7 +2413,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             pmid = str(ref_row['PubMed reference']).strip() if ref_row is not None and not pd.isna(ref_row['PubMed reference']) else "35034351"
 
             # Compute live cohort stats for this variant from processed_df
-            # Match column name in processed_df
             target_col = None
             for c in processed_df.columns:
                 if clean_rsid.lower() in str(c).lower() or ("*2" in vis_marker and "*2" in str(c)) or ("*3" in vis_marker and "*3" in str(c)) or ("*17" in vis_marker and "*17" in str(c)):
@@ -2417,8 +2425,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
             # RENDER DYNAMIC KPI CARDS FOR SELECTED BIOMARKER
             k_v1, k_v2, k_v3, k_v4 = st.columns(4)
-            cohort_maf_pct = f"{(live_res['q'] * 100):.1f}%" if live_res and live_res['valid_samples'] > 0 else "N/A"
-            hwe_label = live_res['interpretation'] if live_res else "N/A"
+            cohort_maf_pct = f"{(live_res['q'] * 100):.1f}%" if live_res and live_res['valid_samples'] > 0 else "N/A (Reference)"
+            hwe_label = live_res['interpretation'] if live_res else "Ref Catalog"
             hwe_color = "#DC2626" if "Departure" in hwe_label else "#166534"
 
             card_st = "background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 12px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.03);"
@@ -2429,7 +2437,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             with k_v1:
                 st.markdown(f"""
                 <div style="{card_st}">
-                    <div style="{lbl_st}">Biomarker Focus</div>
+                    <div style="{lbl_st}">Biomarker Focus ({vis_gene})</div>
                     <div style="{val_st}">{vis_marker.split(' (')[0]}</div>
                     <div style="{sub_st}"><span style="background: #EEF2FF; color: #4338CA; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Evidence {ev_tier}</span></div>
                 </div>
@@ -2447,7 +2455,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 <div style="{card_st}">
                     <div style="{lbl_st}">Hardy-Weinberg Status</div>
                     <div style="{val_st}"><span style="color: {hwe_color}; font-size: 14px;">{hwe_label}</span></div>
-                    <div style="{sub_st}">χ² Stat: {live_res['hwe_chi2'] if live_res else 0.0} (Threshold: 3.4)</div>
+                    <div style="{sub_st}">χ² Stat: {live_res['hwe_chi2'] if live_res else 'N/A'} (Threshold: 3.4)</div>
                 </div>
                 """, unsafe_allow_html=True)
             with k_v4:
@@ -2466,18 +2474,20 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
             with c_ch1:
                 # Comparative MAF Chart: Cohort vs South Asian Reference vs Global Reference
-                c_val = live_res['q'] if live_res and live_res['valid_samples'] > 0 else 0.0
-                comp_data = [
-                    {'Population Source': 'Your Active Cohort', 'Minor Allele Frequency': c_val, 'Type': 'Active Cohort'},
+                c_val = live_res['q'] if live_res and live_res['valid_samples'] > 0 else None
+                comp_data = []
+                if c_val is not None:
+                    comp_data.append({'Population Source': 'Your Active Cohort', 'Minor Allele Frequency': c_val, 'Type': 'Active Cohort'})
+                comp_data.extend([
                     {'Population Source': 'South Asian Ref (SA MAF)', 'Minor Allele Frequency': sa_maf_num, 'Type': 'South Asian Ref'},
                     {'Population Source': 'Global 1000G (MAF)', 'Minor Allele Frequency': glob_maf_num, 'Type': 'Global Ref'}
-                ]
+                ])
                 fig_comp = px.bar(
                     pd.DataFrame(comp_data),
                     x='Population Source', y='Minor Allele Frequency',
                     color='Type',
                     text_auto='.3f',
-                    title=f"Comparative Allele Frequency ({clean_rsid})",
+                    title=f"Comparative Allele Frequency ({clean_rsid} · {vis_gene})",
                     color_discrete_map={'Active Cohort': '#2563EB', 'South Asian Ref': '#059669', 'Global Ref': '#D97706'}
                 )
                 fig_comp.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20), showlegend=False)
@@ -2495,19 +2505,36 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     fig_gt_pie.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
                     st.plotly_chart(fig_gt_pie, use_container_width=True)
                 else:
-                    st.info("No genotype calls recorded for this marker.")
+                    # Show Reference Population Card for markers without cohort calls
+                    st.markdown(f"""
+                    <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; padding: 18px 20px; height: 260px; display: flex; flex-direction: column; justify-content: center;">
+                        <div style="font-size: 13px; font-weight: 700; color: #1E293B;">📖 Reference Marker Profile ({vis_gene} · {clean_rsid})</div>
+                        <p style="font-size: 12px; color: #64748B; margin-top: 6px;">
+                            This marker is curated in the <strong>List of markers_v1.xlsx</strong> pharmacogenomics knowledgebase.
+                        </p>
+                        <div style="font-size: 12px; color: #334155; margin-top: 4px;">
+                            • <strong>Clinical Evidence:</strong> Tier {ev_tier} (CPIC Guideline)<br>
+                            • <strong>South Asian MAF:</strong> {sa_maf_str}<br>
+                            • <strong>Global 1000G MAF:</strong> {glob_maf_str}<br>
+                            • <strong>PubMed Citation:</strong> PMID {pmid}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             st.divider()
 
             # Render Full 9-Tab Studio if CYP2C19 was selected and analyzed
-            if active_gene == 'CYP2C19':
+            if vis_gene == 'CYP2C19':
                 st.markdown("### 🧩 Multi-Variant & Demographic Studio (CYP2C19)")
                 render_unified_results(full_results, qc_report)
             else:
-                st.markdown(f"### 📊 Full Cohort Summary for {active_gene}")
-                if live_res and live_res['genotype_counts']:
-                    g_tbl = pd.DataFrame([{'Genotype Call': k, 'Sample Count (N)': v, 'Frequency (%)': f"{(v / live_res['valid_samples'] * 100):.1f}%"} for k, v in live_res['genotype_counts'].items()])
-                    st.table(g_tbl)
+                st.markdown(f"### 📚 Genomic Knowledgebase Markers for {vis_gene}")
+                sub_catalog = catalog_df[catalog_df['Gene'].str.upper() == vis_gene.upper()] if not catalog_df.empty else pd.DataFrame()
+                if not sub_catalog.empty:
+                    disp_cat = sub_catalog[['Gene', 'Marker', 'SA MAF', '%', 'MAF', 'Level of evidence', 'PubMed reference']].copy()
+                    st.dataframe(disp_cat, use_container_width=True, hide_index=True)
+                else:
+                    st.info(f"No additional markers recorded for {vis_gene}.")
 
             st.divider()
             st.markdown("### Export")
