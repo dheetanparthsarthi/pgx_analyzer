@@ -1270,7 +1270,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                         'COUNT': v, 
                         'FREQUENCY': g_f.get(k, 0),
                         'PERCENTAGE': f"{g_p.get(k, 0):.1f}%"
-                    } for k, v in g_c.items()]
+                    } for k, v in g_c.items() if v > 0]
                     st.table(pd.DataFrame(gt_rows))
                     
                     a_c = s_res.get('allele_counts', {})
@@ -1280,11 +1280,11 @@ def render_unified_results(full_results: dict, qc_report: dict):
                         'TYPE': get_allele_type(k, snp_code),
                         'COUNT': v, 
                         'FREQUENCY': f"{a_p.get(k, 0):.1f}%"
-                    } for k, v in a_c.items()]
+                    } for k, v in a_c.items() if v > 0]
                     st.table(pd.DataFrame(al_rows))
                     
                 with c_fig:
-                    fig_df = pd.DataFrame([{'Genotype': k, 'Count': v} for k, v in g_c.items()])
+                    fig_df = pd.DataFrame([{'Genotype': k, 'Count': v} for k, v in g_c.items() if v > 0])
                     fig_bar = px.bar(
                         fig_df, x='Genotype', y='Count', 
                         title=f"{snp_code} Genotype distribution ({sel_key})", 
@@ -1294,7 +1294,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     fig_bar.update_layout(height=220, margin=dict(l=20, r=20, t=35, b=20))
                     st.plotly_chart(fig_bar, use_container_width=True)
 
-                    al_df = pd.DataFrame([{'Allele': k, 'Frequency (%)': a_p.get(k, 0)} for k in a_c.keys()])
+                    al_df = pd.DataFrame([{'Allele': k, 'Frequency (%)': a_p.get(k, 0)} for k, v in a_c.items() if v > 0])
                     fig_al = px.bar(
                         al_df, x='Allele', y='Frequency (%)',
                         title=f"{snp_code} Allele Frequencies ({sel_key})",
@@ -2238,7 +2238,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     st.markdown("##### CYP2C19 Target Genotypes")
                     fg1, fg2, fg3 = st.columns(3)
                     in_cyp2 = fg1.selectbox("CYP2C19*2 (rs4244285) *", ["GA", "AA", "GG", "Missing", "CC (Invalid Call)"])
-                    in_cyp3 = fg2.selectbox("CYP2C19*3 (rs4986893) *", ["GG", "Missing", "GA (Invalid Call)", "AA (Invalid Call)"])
+                    in_cyp3 = fg2.selectbox("CYP2C19*3 (rs4986893) *", ["GG", "Missing"])
                     in_cyp17 = fg3.selectbox("CYP2C19*17 (rs12248560) *", ["CC", "CT", "TT", "Missing", "GG (Invalid Call)"])
                     
                     submit_sample = st.form_submit_button("➕ Add Sample & Recalculate Statistics", type="primary", use_container_width=True)
@@ -2386,33 +2386,29 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 # Render mapping controls ONLY for the selected markers
                 for idx, marker_label in enumerate(sel_map_markers):
-                    # Determine standard name and allele restrictions
+                    # Determine standard name and default allele options
                     if "*2" in marker_label or "rs4244285" in marker_label:
                         std_name = 'CYP2C19*2'
-                        ref_opts = ['G']
-                        var_opts = ['A']
-                        is_locked = True
-                        ref_help = "Standard wild-type reference allele (G) for CYP2C19*2 (locked)"
-                        var_help = "Standard variant allele (A) for CYP2C19*2 (locked)"
+                        ref_opts = ['G', 'A', 'C', 'T']
+                        var_opts = ['A', 'G', 'C', 'T']
+                        ref_help = "Reference allele for CYP2C19*2 (Standard: G)"
+                        var_help = "Variant allele for CYP2C19*2 (Standard: A)"
                     elif "*3" in marker_label or "rs4986893" in marker_label:
                         std_name = 'CYP2C19*3'
-                        ref_opts = ['G']
-                        var_opts = ['A']
-                        is_locked = True
-                        ref_help = "Standard wild-type reference allele (G) for CYP2C19*3 (locked)"
-                        var_help = "Standard variant allele (A) for CYP2C19*3 (locked)"
+                        ref_opts = ['G', 'A', 'C', 'T']
+                        var_opts = ['None (Only GG in Cohort)', 'A', 'G', 'C', 'T']
+                        ref_help = "Reference allele for CYP2C19*3 (Standard: G)"
+                        var_help = "Variant allele for CYP2C19*3 (Active cohort is monomorphic wild-type GG)"
                     elif "*17" in marker_label or "rs12248560" in marker_label:
                         std_name = 'CYP2C19*17'
-                        ref_opts = ['C']
-                        var_opts = ['T']
-                        is_locked = True
-                        ref_help = "Standard wild-type reference allele (C) for CYP2C19*17 (locked)"
-                        var_help = "Standard variant allele (T) for CYP2C19*17 (locked)"
+                        ref_opts = ['C', 'T', 'A', 'G']
+                        var_opts = ['T', 'C', 'A', 'G']
+                        ref_help = "Reference allele for CYP2C19*17 (Standard: C)"
+                        var_help = "Variant allele for CYP2C19*17 (Standard: T)"
                     else:
                         std_name = marker_label.split(' ')[0]
                         ref_opts = ['A', 'C', 'G', 'T']
                         var_opts = ['A', 'C', 'G', 'T']
-                        is_locked = False
                         ref_help = f"Select reference allele for {marker_label}"
                         var_help = f"Select variant allele for {marker_label}"
 
@@ -2438,8 +2434,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     def_idx = genotype_cols.index(m_def) if m_def in genotype_cols else min(idx % len(genotype_cols), len(genotype_cols) - 1)
 
                     sel_col = c1_m.selectbox("Genotype column", genotype_cols, index=def_idx, key=f"w_map_col_{idx}", help="Select spreadsheet column containing calls for this marker")
-                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, disabled=is_locked, key=f"w_map_ref_{idx}", help=ref_help)
-                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0 if len(var_opts) == 1 else 1, disabled=is_locked, key=f"w_map_var_{idx}", help=var_help)
+                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=f"w_map_ref_{idx}", help=ref_help)
+                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0, key=f"w_map_var_{idx}", help=var_help)
 
                     # 1. Check for Duplicate Column Mapping
                     if sel_col in dup_cols:
