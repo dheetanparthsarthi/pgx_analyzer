@@ -2421,56 +2421,81 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 # Render mapping controls ONLY for the selected markers
                 for idx, marker_label in enumerate(sel_map_markers):
-                    # Determine standard name and default allele options
+                    # Determine standard name, strict allele choices, and matching candidate columns
                     if "*2" in marker_label or "rs4244285" in marker_label:
                         std_name = 'CYP2C19*2'
-                        ref_opts = ['G', 'A', 'C', 'T']
-                        var_opts = ['A', 'G', 'C', 'T']
-                        ref_help = "Reference allele for CYP2C19*2 (Standard: G)"
-                        var_help = "Variant allele for CYP2C19*2 (Standard: A)"
+                        ref_opts = ['G']
+                        var_opts = ['A']
+                        ref_help = "Reference allele for CYP2C19*2 (Strictly G)"
+                        var_help = "Variant allele for CYP2C19*2 (Strictly A)"
+                        badge_short = "Expected: GA, GG, AA"
+                        badge_detail = "Permitted calls: <b>GA</b> (Heterozygote), <b>GG</b> (Wild-type), <b>AA</b> (Homozygous Variant) | Ref: <b>G</b>, Var: <b>A</b>"
+                        matching_cols = [c for c in genotype_cols if '*2' in str(c) or 'rs4244285' in str(c).lower() or 'c.681' in str(c).lower()]
                     elif "*3" in marker_label or "rs4986893" in marker_label:
                         std_name = 'CYP2C19*3'
-                        ref_opts = ['G', 'A', 'C', 'T']
-                        var_opts = ['None (Only GG in Cohort)', 'A', 'G', 'C', 'T']
-                        ref_help = "Reference allele for CYP2C19*3 (Standard: G)"
-                        var_help = "Variant allele for CYP2C19*3 (Active cohort is monomorphic wild-type GG)"
+                        ref_opts = ['G']
+                        var_opts = ['None (Only GG in Cohort)']
+                        ref_help = "Reference allele for CYP2C19*3 (Strictly G)"
+                        var_help = "Variant allele for CYP2C19*3 (Active cohort is monomorphic wild-type GG; MAF=0.0)"
+                        badge_short = "Expected: GG (Wild-type only)"
+                        badge_detail = "Permitted call: <b>GG</b> (Homozygous Wild-Type only, 100% of samples) | Ref: <b>G</b>, Var: <b>None</b> (MAF: 0.0)"
+                        matching_cols = [c for c in genotype_cols if '*3' in str(c) or 'rs4986893' in str(c).lower() or 'c.636' in str(c).lower()]
                     elif "*17" in marker_label or "rs12248560" in marker_label:
                         std_name = 'CYP2C19*17'
-                        ref_opts = ['C', 'T', 'A', 'G']
-                        var_opts = ['T', 'C', 'A', 'G']
-                        ref_help = "Reference allele for CYP2C19*17 (Standard: C)"
-                        var_help = "Variant allele for CYP2C19*17 (Standard: T)"
+                        ref_opts = ['C']
+                        var_opts = ['T']
+                        ref_help = "Reference allele for CYP2C19*17 (Strictly C)"
+                        var_help = "Variant allele for CYP2C19*17 (Strictly T)"
+                        badge_short = "Expected: CC, CT, TT"
+                        badge_detail = "Permitted calls: <b>CC</b> (Wild-type), <b>CT</b> (Heterozygote), <b>TT</b> (Homozygous Variant) | Ref: <b>C</b>, Var: <b>T</b>"
+                        matching_cols = [c for c in genotype_cols if '*17' in str(c) or 'rs12248560' in str(c).lower() or 'c.-806' in str(c).lower()]
                     else:
                         std_name = marker_label.split(' ')[0]
                         ref_opts = ['A', 'C', 'G', 'T']
                         var_opts = ['A', 'C', 'G', 'T']
                         ref_help = f"Select reference allele for {marker_label}"
                         var_help = f"Select variant allele for {marker_label}"
+                        badge_short = "Custom Marker"
+                        badge_detail = f"Map matching spreadsheet column and alleles for {marker_label}"
+                        matching_cols = [c for c in genotype_cols if std_name.lower() in str(c).lower()]
+
+                    # Fallback to general find_default or genotype_cols if specific matching finds nothing
+                    if not matching_cols:
+                        m_def = find_default([marker_label, std_name], genotype_cols)
+                        if m_def in genotype_cols:
+                            matching_cols = [m_def]
+                    
+                    col_options = matching_cols if matching_cols else genotype_cols
+
+                    # Sanitize session state keys if options changed
+                    col_key = f"w_map_col_{idx}"
+                    if col_key in st.session_state and st.session_state[col_key] not in col_options:
+                        st.session_state[col_key] = col_options[0]
+
+                    ref_key = f"w_map_ref_{idx}"
+                    if ref_key in st.session_state and st.session_state[ref_key] not in ref_opts:
+                        st.session_state[ref_key] = ref_opts[0]
+
+                    var_key = f"w_map_var_{idx}"
+                    if var_key in st.session_state and st.session_state[var_key] not in var_opts:
+                        st.session_state[var_key] = var_opts[0]
 
                     st.markdown(f"""
-                    <div class="clean-card-box">
-                        <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">🧬 {marker_label}</h5>
+                    <div class="clean-card-box" style="margin-bottom: 10px; border-left: 4px solid #3B82F6;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                            <h5 style="margin:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">🧬 {marker_label}</h5>
+                            <span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #BFDBFE;">{badge_short}</span>
+                        </div>
+                        <div style="margin-top: 6px; font-size: 0.85rem; color: #475569;">
+                            {badge_detail}
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
                     
                     c1_m, c2_m, c3_m = st.columns(3)
-                    
-                    # Pattern matching for auto-detection
-                    m_clean = marker_label.lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
-                    patterns_to_try = [marker_label, m_clean]
-                    if "*2" in marker_label or "rs4244285" in marker_label:
-                        patterns_to_try.extend(['*2', 'cyp2c19*2', 'rs4244285', 'c.681'])
-                    elif "*3" in marker_label or "rs4986893" in marker_label:
-                        patterns_to_try.extend(['*3', 'cyp2c19*3', 'rs4986893', 'c.636'])
-                    elif "*17" in marker_label or "rs12248560" in marker_label:
-                        patterns_to_try.extend(['*17', 'cyp2c19*17', 'rs12248560', 'c.-806'])
-
-                    m_def = find_default(patterns_to_try, genotype_cols)
-                    def_idx = genotype_cols.index(m_def) if m_def in genotype_cols else min(idx % len(genotype_cols), len(genotype_cols) - 1)
-
-                    sel_col = c1_m.selectbox("Genotype column", genotype_cols, index=def_idx, key=f"w_map_col_{idx}", help="Select spreadsheet column containing calls for this marker")
-                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=f"w_map_ref_{idx}", help=ref_help)
-                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0, key=f"w_map_var_{idx}", help=var_help)
+                    sel_col = c1_m.selectbox("Genotype column", col_options, index=0, key=col_key, help=f"Matching spreadsheet column for {marker_label}")
+                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=ref_key, help=ref_help)
+                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0, key=var_key, help=var_help)
 
                     # 1. Check for Duplicate Column Mapping
                     if sel_col in dup_cols:
@@ -2487,10 +2512,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     if not is_name_match:
                         st.warning(f"⚠️ **Column Mismatch Warning:** Selected column `{sel_col}` does not appear to match marker **{marker_label}**. Please verify that you selected the correct column.")
 
+                    v_al_stored = 'A' if 'None' in var_val else var_val.strip().upper()
                     mapped_marker_dict[sel_col] = {
                         'std_name': std_name,
                         'ref_allele': ref_val.strip().upper(),
-                        'var_allele': var_val.strip().upper(),
+                        'var_allele': v_al_stored,
                         'marker_label': marker_label
                     }
 
