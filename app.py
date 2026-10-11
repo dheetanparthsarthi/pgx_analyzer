@@ -202,18 +202,27 @@ CUSTOM_CSS = """
     }
 
     /* Header container transparent while keeping sidebar toggle button visible */
+    /* Header container transparent with click passthrough so it never blocks page buttons */
     [data-testid="stHeader"] {
         background-color: transparent !important;
         z-index: 99999 !important;
         display: flex !important;
         visibility: visible !important;
+        pointer-events: none !important;
     }
     
-    /* Keep Toolbar visible so the expand button can render cleanly */
+    /* Keep Toolbar visible so the expand button can render cleanly with click passthrough */
     [data-testid="stToolbar"] {
         visibility: visible !important;
         display: flex !important;
         background-color: transparent !important;
+        pointer-events: none !important;
+    }
+
+    /* Interactive controls inside header/toolbar have pointer-events auto */
+    [data-testid="stHeader"] button,
+    [data-testid="stToolbar"] button {
+        pointer-events: auto !important;
     }
 
     /* Ensure BOTH Sidebar Expand and Collapse Buttons are ALWAYS prominently visible & clickable */
@@ -233,6 +242,7 @@ CUSTOM_CSS = """
         margin: 0.4rem !important;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
         cursor: pointer !important;
+        pointer-events: auto !important;
         z-index: 1000000 !important;
     }
 
@@ -255,6 +265,7 @@ CUSTOM_CSS = """
         border-radius: 6px !important;
         padding: 4px 6px !important;
         cursor: pointer !important;
+        pointer-events: auto !important;
     }
 
     [data-testid="stSidebarCollapseButton"]:hover,
@@ -438,38 +449,8 @@ with st.sidebar:
     st.caption("Automated Population Pharmacogenomics Platform")
     
     st.divider()
-    
-    # 1. Direct Workflow Step Navigation
-    st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>🧭 Workflow Navigation</div>", unsafe_allow_html=True)
-    step_choices = ["1 · Upload", "2 · Map columns", "3 · Results"]
-    cur_step = st.session_state.get('workflow_step', '1 · Upload')
-    cur_idx = step_choices.index(cur_step) if cur_step in step_choices else 0
-    
-    new_step = st.radio(
-        "Workflow Step:",
-        step_choices,
-        index=cur_idx,
-        key="sb_workflow_nav_radio",
-        label_visibility="collapsed"
-    )
-    if new_step != cur_step:
-        st.session_state['workflow_step'] = new_step
-        st.rerun()
 
-    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-    
-    # 2. Active Cohort Status Summary
-    st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>📊 Cohort Workspace</div>", unsafe_allow_html=True)
-    if has_active_data():
-        n_samp = full_results['overall'].get('sample_count', 0)
-        n_valid = qc_report.get('fully_valid_samples', n_samp)
-        st.success(f"🟢 **{n_samp:,} Samples Loaded**\n\nValid: `{n_valid:,}` | Invalid: `{qc_report.get('invalid_genotypes_count', 0)}`")
-    else:
-        st.info("⚪ **Empty Workspace**\n\n0 patient samples loaded.")
-
-    st.divider()
-
-    # 3. Workspace Controls (Reset / Delete)
+    # Workspace Controls (Reset / Delete)
     st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>⚙️ Workspace Actions</div>", unsafe_allow_html=True)
     if st.session_state.get('show_delete_confirm', False):
         st.warning("⚠️ **Delete Active Dataset?**\nResets workspace to 0 samples.")
@@ -487,9 +468,6 @@ with st.sidebar:
         if st.button("🗑️ Delete Active Dataset", type="secondary", use_container_width=True, key="btn_sb_init_del"):
             st.session_state['show_delete_confirm'] = True
             st.rerun()
-
-    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-    st.caption("💡 *Tip: Click the ◀ arrow at top-right of sidebar to minimize. When minimized, click the ▶ arrow at top-left of page to reopen.*")
 
 # -----------------------------------------------------------------------------
 # CYP2C19 COMBINATION & GEOGRAPHIC STUDIO (DOWNSIDE OF TAB 5)
