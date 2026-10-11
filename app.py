@@ -425,54 +425,76 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
         st.info("No pharmacogenomic data available for combination analysis.")
         return
 
-    st.markdown("<hr style='margin: 2rem 0 1.5rem 0; border: 0; border-top: 1px solid #CBD5E1;'>", unsafe_allow_html=True)
-    st.markdown("### 🧩 CYP2C19 Combination & Geographic Studio")
-    st.caption("Interactive multi-variant combination analysis, dual visual charts (Donut + Bar), regional geographical plots, and statistical tables.")
+    # -------------------------------------------------------------------------
+    # STUDIO CONTAINER & HEADER (CLEAN, COMPACT TYPOGRAPHY)
+    # -------------------------------------------------------------------------
+    st.markdown("""
+    <div style="border-top: 1px solid #E2E8F0; margin-top: 1.5rem; padding-top: 1rem; margin-bottom: 0.75rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <span style="font-size: 16px; font-weight: 700; color: #0F172A;">🧩 CYP2C19 Multi-Variant & Geographic Studio</span>
+                <span style="margin-left: 8px; font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 7px; border-radius: 4px; border: 1px solid #CBD5E1;">CPIC v2024 / PharmGKB</span>
+            </div>
+        </div>
+        <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748B;">
+            Standardized multi-locus genotype stratification, scientific nomenclature mapping (HGVS / rsID), and sub-population distribution analysis.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # 1. VARIANT COMBINATION FOCUS SELECTOR (PLACED FIRST)
+    # 1. VARIANT COMBINATION FOCUS SELECTOR (STANDARD SCIENTIFIC NOMENCLATURE)
     # -------------------------------------------------------------------------
+    st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
+    
     variant_combo_choice = st.radio(
-        "👉 Select Variant Combination to Analyze:",
+        "Variant Combination:",
         [
-            "🧬 CYP2C19*2 + CYP2C19*3 (Only These 2 Variants)",
-            "🧬 CYP2C19*2 + CYP2C19*17 (Only These 2 Variants)",
-            "🧬 CYP2C19*3 + CYP2C19*17 (Only These 2 Variants)",
-            "🧬 All 3 Variants Combined (*2 + *3 + *17)"
+            "CYP2C19 *2 + *3 (c.681G>A / c.636G>A · Loss of Function)",
+            "CYP2C19 *2 + *17 (c.681G>A / c.-806C>T · LOF + Increased Function)",
+            "CYP2C19 *3 + *17 (c.636G>A / c.-806C>T · LOF + Increased Function)",
+            "CYP2C19 Core Panel (*2 + *3 + *17 · Full 3-Locus Trio)"
         ],
         horizontal=True,
-        key="studio_variant_combo_choice"
+        key="studio_variant_combo_choice",
+        label_visibility="collapsed"
     )
 
-    # Determine active SNP columns based on choice
-    if "CYP2C19*2 + CYP2C19*3" in variant_combo_choice:
+    # Map choice to standardized loci
+    if "*2 + *3" in variant_combo_choice:
         active_snps = ['CYP2C19*2', 'CYP2C19*3']
-        combo_title = "CYP2C19*2 + CYP2C19*3"
-    elif "CYP2C19*2 + CYP2C19*17" in variant_combo_choice:
+        combo_title = "CYP2C19 *2 + *3"
+        std_snps_label = "c.681G>A & c.636G>A"
+        rs_label = "rs4244285 + rs4986893"
+    elif "*2 + *17" in variant_combo_choice:
         active_snps = ['CYP2C19*2', 'CYP2C19*17']
-        combo_title = "CYP2C19*2 + CYP2C19*17"
-    elif "CYP2C19*3 + CYP2C19*17" in variant_combo_choice:
+        combo_title = "CYP2C19 *2 + *17"
+        std_snps_label = "c.681G>A & c.-806C>T"
+        rs_label = "rs4244285 + rs12248560"
+    elif "*3 + *17" in variant_combo_choice:
         active_snps = ['CYP2C19*3', 'CYP2C19*17']
-        combo_title = "CYP2C19*3 + CYP2C19*17"
+        combo_title = "CYP2C19 *3 + *17"
+        std_snps_label = "c.636G>A & c.-806C>T"
+        rs_label = "rs4986893 + rs12248560"
     else:
         active_snps = ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
-        combo_title = "CYP2C19*2 + *3 + *17 (All 3 Variants)"
+        combo_title = "CYP2C19 *2 + *3 + *17"
+        std_snps_label = "c.681G>A, c.636G>A & c.-806C>T"
+        rs_label = "rs4244285 + rs4986893 + rs12248560"
 
     active_snps = [c for c in active_snps if c in processed_df.columns]
     state_col = 'State_Clean' if 'State_Clean' in processed_df.columns else ('State' if 'State' in processed_df.columns else None)
 
     # -------------------------------------------------------------------------
-    # 2. GEOGRAPHICAL & STATE-WISE FILTERING (SHOWN AFTER VARIANT COMBINATION)
+    # 2. GEOGRAPHIC LEVEL, SPECIFIC DRILL-DOWN, AND NOMENCLATURE FORMAT
     # -------------------------------------------------------------------------
-    st.markdown("<br>", unsafe_allow_html=True)
-    c_geo, c_specific, c_nom = st.columns([1.1, 1.3, 1.0])
+    c_geo, c_specific, c_nom = st.columns([1.1, 1.4, 1.1])
 
     with c_geo:
         default_scope_idx = 1 if "Geographical" in view_mode else 0
-        geo_scope = st.radio(
-            "🌍 Geographic Aggregation Level:",
-            ["🌐 Overall Cohort", "🗺️ Geographical Regions", "📍 State-Wise Profiles"],
-            horizontal=False,
+        geo_scope = st.selectbox(
+            "🌍 Geographic Level:",
+            ["🌐 Overall Cohort (Pan-India)", "🗺️ Geographical Regions", "📍 State-Wise Profiles"],
             index=default_scope_idx,
             key="studio_geo_scope"
         )
@@ -481,59 +503,61 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     selected_state = "All States (Comparative Overview)"
 
     with c_specific:
-        if geo_scope == "🗺️ Geographical Regions":
+        if "Geographical Regions" in geo_scope:
             region_list = ["All Regions (Comparative Overview)"]
             if 'Region' in processed_df.columns:
                 unique_regs = sorted([str(r) for r in processed_df['Region'].dropna().unique() if str(r).strip() != ''])
                 region_list.extend(unique_regs)
             selected_region = st.selectbox(
-                "🗺️ Select Geographical Part / Region:",
+                "🗺️ Specific Geographical Region:",
                 region_list,
                 key="studio_sel_region"
             )
-        elif geo_scope == "📍 State-Wise Profiles":
+        elif "State-Wise Profiles" in geo_scope:
             state_list = ["All States (Comparative Overview)"]
             if state_col and state_col in processed_df.columns:
                 unique_states = sorted([str(s) for s in processed_df[state_col].dropna().unique() if str(s).strip() != ''])
                 state_list.extend(unique_states)
             selected_state = st.selectbox(
-                "📍 Select State Profile:",
+                "📍 Specific State Profile:",
                 state_list,
                 key="studio_sel_state"
             )
         else:
-            st.info("🌐 **Pan-Cohort View:** Displaying total cohort aggregated across all regions and states.")
+            st.selectbox(
+                "📍 Stratification Status:",
+                ["Pan-Cohort (All 28 States & UTs Included)"],
+                disabled=True,
+                key="studio_disabled_geo"
+            )
 
     with c_nom:
-        nomenclature = st.radio(
+        nomenclature = st.selectbox(
             "🔬 Nomenclature Format:",
-            ["🧬 Star-Allele (*2, *3, *17)", "🔬 Scientific rsID"],
-            horizontal=False,
+            ["🧬 Star-Allele (*2, *3, *17)", "🔬 Scientific rsID (NCBI / HGVS)"],
             key="studio_nomenclature"
         )
 
     is_sci = "Scientific" in nomenclature
-    if is_sci:
-        st.info("🔬 **Scientific rsID Active:** `rs4244285` (CYP2C19*2) | `rs4986893` (CYP2C19*3) | `rs12248560` (CYP2C19*17)")
 
     # -------------------------------------------------------------------------
-    # 3. DYNAMIC DATA FILTERING BASED ON GEOGRAPHY / STATE SELECTION
+    # 3. DYNAMIC DATA FILTERING BASED ON GEOGRAPHY / STATE
     # -------------------------------------------------------------------------
     active_df = processed_df.copy()
     scope_label = "Overall Cohort"
 
-    if geo_scope == "🗺️ Geographical Regions":
+    if "Geographical Regions" in geo_scope:
         if selected_region != "All Regions (Comparative Overview)":
             active_df = active_df[active_df['Region'].astype(str) == str(selected_region)]
             scope_label = f"Region: {selected_region}"
         else:
-            scope_label = "All Geographical Regions"
-    elif geo_scope == "📍 State-Wise Profiles":
+            scope_label = "All Regions (Comparative)"
+    elif "State-Wise Profiles" in geo_scope:
         if selected_state != "All States (Comparative Overview)" and state_col:
             active_df = active_df[active_df[state_col].astype(str) == str(selected_state)]
             scope_label = f"State: {selected_state}"
         else:
-            scope_label = "All States"
+            scope_label = "All States (Comparative)"
 
     tot_cohort = len(active_df)
     if tot_cohort == 0:
@@ -577,14 +601,51 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     top_pct = combo_grp.iloc[0]['Frequency (%)'] if not combo_grp.empty else '0%'
     num_patterns = len(combo_grp)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Active Combination Focus", combo_title)
-    m2.metric("Geographic Scope", scope_label)
-    m3.metric("Filtered Patients (N)", f"{tot_cohort:,}")
-    m4.metric("Predominant Genotype", f"{top_pattern} ({top_pct})")
+    # -------------------------------------------------------------------------
+    # COMPACT, ELEGANT KPI SUMMARY CARDS (NO OVERSIZED FONTS)
+    # -------------------------------------------------------------------------
+    st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
+    k1, k2, k3, k4 = st.columns(4)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    card_style = "background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 12px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.03);"
+    label_style = "font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748B; letter-spacing: 0.04em;"
+    val_style = "font-size: 15px; font-weight: 700; color: #0F172A; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+    sub_style = "font-size: 11px; color: #475569; margin-top: 2px;"
+
+    with k1:
+        st.markdown(f"""
+        <div style="{card_style}">
+            <div style="{label_style}">Variant Target</div>
+            <div style="{val_style}">{combo_title}</div>
+            <div style="{sub_style}"><span style="color: #2563EB;">{std_snps_label}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""
+        <div style="{card_style}">
+            <div style="{label_style}">Geographic Scope</div>
+            <div style="{val_style}">{scope_label}</div>
+            <div style="{sub_style}"><span style="color: #059669;">Stratified Analysis</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k3:
+        st.markdown(f"""
+        <div style="{card_style}">
+            <div style="{label_style}">Cohort Size</div>
+            <div style="{val_style}">{tot_cohort:,} Samples</div>
+            <div style="{sub_style}">{num_patterns} Distinct Patterns</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""
+        <div style="{card_style}">
+            <div style="{label_style}">Predominant Genotype</div>
+            <div style="{val_style}"><span style="color: #166534;">{top_pattern}</span></div>
+            <div style="{sub_style}">{top_pct} of Active Cohort</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
     # 4. DUAL VISUAL CHARTS (DONUT / PIE CHART + COMPARATIVE BAR CHART)
@@ -596,11 +657,16 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             combo_grp,
             names='Combination Pattern',
             values='Sample Count (N)',
-            hole=0.45,
-            title=f"Proportion Distribution of {combo_title} — {scope_label}",
-            color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8', '#4B5563']
+            hole=0.48,
+            title=f"Proportion Distribution ({scope_label})",
+            color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8', '#475569']
         )
-        fig_donut.update_layout(height=330, margin=dict(l=20, r=20, t=35, b=20))
+        fig_donut.update_layout(
+            height=280,
+            margin=dict(l=10, r=10, t=32, b=10),
+            title_font=dict(size=13, color='#0F172A', family='Inter, -apple-system, sans-serif'),
+            legend=dict(font=dict(size=10), orientation='v')
+        )
         st.plotly_chart(fig_donut, use_container_width=True)
 
     with c_bar:
@@ -610,42 +676,50 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             y='Combination Pattern',
             orientation='h',
             text='Frequency (%)',
-            title=f"Sample Counts & Frequencies — {scope_label}",
+            title=f"Sample Counts & Frequencies ({scope_label})",
             color='Combination Pattern',
-            color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8', '#4B5563']
+            color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8', '#475569']
         )
-        fig_bars.update_layout(height=330, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"), showlegend=False)
-        fig_bars.update_traces(textposition='outside')
+        fig_bars.update_layout(
+            height=280,
+            margin=dict(l=10, r=10, t=32, b=10),
+            yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
+            xaxis=dict(tickfont=dict(size=11), gridcolor='#F1F5F9'),
+            title_font=dict(size=13, color='#0F172A', family='Inter, -apple-system, sans-serif'),
+            showlegend=False
+        )
+        fig_bars.update_traces(textposition='outside', textfont=dict(size=10))
         st.plotly_chart(fig_bars, use_container_width=True)
 
     # -------------------------------------------------------------------------
     # 5. GEOGRAPHICAL & STATE-WISE BREAKDOWN CHARTS & TABLES
     # -------------------------------------------------------------------------
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    if geo_scope == "🗺️ Geographical Regions":
+    if "Geographical Regions" in geo_scope:
         if selected_region != "All Regions (Comparative Overview)":
-            st.markdown(f"#### 🗺️ Regional State Breakdown within `{selected_region}` for `{combo_title}`")
+            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>🗺️ State Breakdown within {selected_region} (N = {tot_cohort})</div>", unsafe_allow_html=True)
             if state_col and state_col in active_df.columns:
                 st_counts = active_df[state_col].value_counts().reset_index()
                 st_counts.columns = ['State', 'Patients (N)']
                 if len(st_counts) > 1:
                     fig_st_reg = px.bar(
                         st_counts, x='State', y='Patients (N)',
-                        title=f"States Comprising {selected_region} (N = {tot_cohort})",
+                        title=f"State Distribution in {selected_region}",
                         color='Patients (N)',
                         color_continuous_scale='Greens'
                     )
-                    fig_st_reg.update_layout(height=300, margin=dict(l=20, r=20, t=35, b=20))
+                    fig_st_reg.update_layout(
+                        height=260, margin=dict(l=10, r=10, t=30, b=10),
+                        title_font=dict(size=12, color='#0F172A'),
+                        xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
+                    )
                     st.plotly_chart(fig_st_reg, use_container_width=True)
                 else:
-                    st.info(f"All {tot_cohort} patients in `{selected_region}` are from State: **{st_counts.iloc[0]['State']}**.")
+                    st.caption(f"All {tot_cohort} samples in `{selected_region}` are from State: **{st_counts.iloc[0]['State']}**.")
         else:
-            st.markdown(f"#### 🗺️ Regional Cross-Comparison for `{combo_title}` Across All Regions")
+            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>🗺️ Regional Cross-Comparison for {combo_title} Across India</div>", unsafe_allow_html=True)
             if 'Region' in processed_df.columns:
                 pattern_series = processed_df[active_snps].apply(lambda r: " + ".join(r.astype(str)), axis=1)
                 pivot_reg = pd.crosstab(processed_df['Region'], pattern_series, margins=True, margins_name="Total")
-                st.markdown("**Regional Cross-Tabulation Matrix:**")
                 st.dataframe(pivot_reg, use_container_width=True)
 
                 reg_agg = processed_df.groupby(['Region'] + active_snps).size().reset_index(name='Patients (N)')
@@ -655,25 +729,28 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
                     barmode='stack', title=f"Regional Composition of {combo_title} (Stacked)",
                     color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8']
                 )
-                fig_reg_bar.update_layout(height=320, margin=dict(l=20, r=20, t=35, b=20))
+                fig_reg_bar.update_layout(
+                    height=280, margin=dict(l=10, r=10, t=30, b=10),
+                    title_font=dict(size=12, color='#0F172A'),
+                    xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
+                )
                 st.plotly_chart(fig_reg_bar, use_container_width=True)
 
-    elif geo_scope == "📍 State-Wise Profiles":
+    elif "State-Wise Profiles" in geo_scope:
         if selected_state != "All States (Comparative Overview)":
-            st.markdown(f"#### 📍 Profile Details for State: `{selected_state}` (N = {tot_cohort})")
+            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>📍 State Profile: {selected_state} (N = {tot_cohort})</div>", unsafe_allow_html=True)
             if 'Gender_Clean' in active_df.columns or 'Gender' in active_df.columns:
                 g_col = 'Gender_Clean' if 'Gender_Clean' in active_df.columns else 'Gender'
                 g_counts = active_df[g_col].value_counts().reset_index()
                 g_counts.columns = ['Gender', 'Count']
-                fig_g = px.pie(g_counts, names='Gender', values='Count', hole=0.4, title=f"Gender Distribution in {selected_state}")
-                fig_g.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                fig_g = px.pie(g_counts, names='Gender', values='Count', hole=0.45, title=f"Gender Distribution in {selected_state}")
+                fig_g.update_layout(height=240, margin=dict(l=10, r=10, t=30, b=10), title_font=dict(size=12))
                 st.plotly_chart(fig_g, use_container_width=True)
         else:
-            st.markdown(f"#### 📍 State-Wise Comparison for `{combo_title}` Across All States")
+            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>📍 State Cross-Tabulation & Top States by Cohort Size</div>", unsafe_allow_html=True)
             if state_col and state_col in processed_df.columns:
                 pattern_series = processed_df[active_snps].apply(lambda r: " + ".join(r.astype(str)), axis=1)
                 pivot_st = pd.crosstab(processed_df[state_col], pattern_series, margins=True, margins_name="Total")
-                st.markdown("**State-Wise Cross-Tabulation Matrix:**")
                 st.dataframe(pivot_st, use_container_width=True)
 
                 st_counts = processed_df[state_col].value_counts().head(10).reset_index()
@@ -684,7 +761,11 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
                     color='Total Patients',
                     color_continuous_scale='Greens'
                 )
-                fig_st.update_layout(height=320, margin=dict(l=20, r=20, t=35, b=20))
+                fig_st.update_layout(
+                    height=280, margin=dict(l=10, r=10, t=30, b=10),
+                    title_font=dict(size=12, color='#0F172A'),
+                    xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
+                )
                 st.plotly_chart(fig_st, use_container_width=True)
 
     else:
@@ -693,25 +774,41 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             reg_counts.columns = ['Region', 'Patients (N)']
             fig_reg_ov = px.bar(
                 reg_counts, x='Region', y='Patients (N)',
-                title="Regional Population Distribution (North, South, East, West, Central)",
+                title="Pan-Indian Regional Population Distribution",
                 color='Region',
                 color_discrete_sequence=px.colors.qualitative.Set2
             )
-            fig_reg_ov.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
+            fig_reg_ov.update_layout(
+                height=250, margin=dict(l=10, r=10, t=30, b=10),
+                title_font=dict(size=12, color='#0F172A'),
+                xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
+            )
             st.plotly_chart(fig_reg_ov, use_container_width=True)
 
     # -------------------------------------------------------------------------
-    # 6. STATISTICAL COMBINATION TABLE (SYNCHRONIZED WITH ACTIVE FILTER)
+    # 6. STATISTICAL COMBINATION TABLE (STANDARDIZED SCIENTIFIC HEADERS)
     # -------------------------------------------------------------------------
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f"#### 📋 Statistical Combination Table for `{combo_title}` — {scope_label}")
+    st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 14px 0 6px 0;'>📋 Statistical Combination Table — {combo_title} ({scope_label})</div>", unsafe_allow_html=True)
 
     table_display = combo_grp.copy()
     if is_sci:
         rename_dict = {
-            'CYP2C19*2': 'rs4244285 (*2)',
-            'CYP2C19*3': 'rs4986893 (*3)',
-            'CYP2C19*17': 'rs12248560 (*17)'
+            'CYP2C19*2': 'rs4244285 (*2, c.681G>A)',
+            'CYP2C19*3': 'rs4986893 (*3, c.636G>A)',
+            'CYP2C19*17': 'rs12248560 (*17, c.-806C>T)',
+            'Combination Pattern': 'Multi-Locus Pattern',
+            'Sample Count (N)': 'Samples (N)',
+            'CPIC Phenotype(s)': 'CPIC Clinical Phenotype'
+        }
+        table_display = table_display.rename(columns=rename_dict)
+    else:
+        rename_dict = {
+            'CYP2C19*2': 'CYP2C19*2 (c.681G>A)',
+            'CYP2C19*3': 'CYP2C19*3 (c.636G>A)',
+            'CYP2C19*17': 'CYP2C19*17 (c.-806C>T)',
+            'Combination Pattern': 'Genotype Combination',
+            'Sample Count (N)': 'Samples (N)',
+            'CPIC Phenotype(s)': 'CPIC Clinical Phenotype'
         }
         table_display = table_display.rename(columns=rename_dict)
 
