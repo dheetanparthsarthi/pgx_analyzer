@@ -205,23 +205,66 @@ CUSTOM_CSS = """
     [data-testid="stHeader"] {
         background-color: transparent !important;
         z-index: 99999 !important;
+        display: flex !important;
+        visibility: visible !important;
     }
     
-    /* Ensure Sidebar Expand/Collapse Toggle Button is always visible */
-    [data-testid="collapsedControl"] {
+    /* Keep Toolbar visible so the expand button can render cleanly */
+    [data-testid="stToolbar"] {
         visibility: visible !important;
-        display: block !important;
-        color: #0F172A !important;
-        background-color: #FFFFFF !important;
-        border: 1px solid #CBD5E1 !important;
-        border-radius: 6px !important;
-        margin: 0.5rem !important;
+        display: flex !important;
+        background-color: transparent !important;
     }
 
-    /* Hide Streamlit Footer, MainMenu, Toolbar, and Community Cloud Badges */
+    /* Ensure BOTH Sidebar Expand and Collapse Buttons are ALWAYS prominently visible & clickable */
+    [data-testid="stExpandSidebarButton"], 
+    button[data-testid="stExpandSidebarButton"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"],
+    button[aria-label="Expand sidebar"] {
+        visibility: visible !important;
+        display: flex !important;
+        opacity: 1 !important;
+        color: #0F172A !important;
+        background-color: #FFFFFF !important;
+        border: 1.5px solid #94A3B8 !important;
+        border-radius: 8px !important;
+        padding: 5px 8px !important;
+        margin: 0.4rem !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+        cursor: pointer !important;
+        z-index: 1000000 !important;
+    }
+
+    [data-testid="stExpandSidebarButton"]:hover,
+    button[data-testid="stExpandSidebarButton"]:hover {
+        background-color: #F1F5F9 !important;
+        border-color: #334155 !important;
+        transform: scale(1.05);
+    }
+
+    [data-testid="stSidebarCollapseButton"],
+    button[data-testid="stSidebarCollapseButton"],
+    button[aria-label="Collapse sidebar"],
+    button[aria-label="Close sidebar"] {
+        visibility: visible !important;
+        display: flex !important;
+        color: #0F172A !important;
+        background-color: #F8FAFC !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 6px !important;
+        padding: 4px 6px !important;
+        cursor: pointer !important;
+    }
+
+    [data-testid="stSidebarCollapseButton"]:hover,
+    button[data-testid="stSidebarCollapseButton"]:hover {
+        background-color: #E2E8F0 !important;
+    }
+
+    /* Hide Streamlit Footer, MainMenu, Status Widget, and Community Cloud Badges (without hiding expand button) */
     #MainMenu {visibility: hidden !important; display: none !important;}
     footer {visibility: hidden !important; display: none !important;}
-    [data-testid="stToolbar"] {visibility: hidden !important; display: none !important;}
     [data-testid="stStatusWidget"] {visibility: hidden !important; display: none !important;}
     [data-testid="stDecoration"] {visibility: hidden !important; display: none !important;}
     [data-testid="stReportViewer"] footer {display: none !important;}
@@ -230,6 +273,7 @@ CUSTOM_CSS = """
     div[class*="viewerBadge"] {display: none !important;}
     div[data-testid="user-avatar"] {display: none !important;}
     button[title*="Streamlit"] {display: none !important;}
+    button[title*="View app in Streamlit Community Cloud"] {display: none !important;}
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -373,19 +417,62 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple):
     full_results = DemographicStratifier.stratify_and_analyze(clean_df)
     return clean_df, qc_report, full_results
 
+# Execute Pipeline
+df_raw = st.session_state['uploaded_df']
+mapped_tuple = tuple(sorted(st.session_state['mapped_cols'].items()))
+clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple)
+processed_df = full_results.get('processed_dataframe', pd.DataFrame())
+
+# Helper to check active dataset state
+def has_active_data() -> bool:
+    if full_results is None or 'overall' not in full_results:
+        return False
+    return full_results['overall'].get('sample_count', 0) > 0
+
 # -----------------------------------------------------------------------------
-# 3. SIDEBAR NAVIGATION MENU (CLEAN DATA MANAGEMENT SIDEBAR)
+# 3. SIDEBAR NAVIGATION MENU (WITH ACTIVE WORKFLOW & STATUS)
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3004/3004458.png", width=64)
-    st.title("PGx Analytics Pro")
+    st.image("https://cdn-icons-png.flaticon.com/512/3004/3004458.png", width=52)
+    st.markdown("<h2 style='font-size: 1.25rem; margin: 0; padding: 0;'>PGx Analytics Pro</h2>", unsafe_allow_html=True)
     st.caption("Automated Population Pharmacogenomics Platform")
     
     st.divider()
-    st.markdown("### Workspace Control")
     
+    # 1. Direct Workflow Step Navigation
+    st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>🧭 Workflow Navigation</div>", unsafe_allow_html=True)
+    step_choices = ["1 · Upload", "2 · Map columns", "3 · Results"]
+    cur_step = st.session_state.get('workflow_step', '1 · Upload')
+    cur_idx = step_choices.index(cur_step) if cur_step in step_choices else 0
+    
+    new_step = st.radio(
+        "Workflow Step:",
+        step_choices,
+        index=cur_idx,
+        key="sb_workflow_nav_radio",
+        label_visibility="collapsed"
+    )
+    if new_step != cur_step:
+        st.session_state['workflow_step'] = new_step
+        st.rerun()
+
+    st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+    
+    # 2. Active Cohort Status Summary
+    st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>📊 Cohort Workspace</div>", unsafe_allow_html=True)
+    if has_active_data():
+        n_samp = full_results['overall'].get('sample_count', 0)
+        n_valid = qc_report.get('fully_valid_samples', n_samp)
+        st.success(f"🟢 **{n_samp:,} Samples Loaded**\n\nValid: `{n_valid:,}` | Invalid: `{qc_report.get('invalid_genotypes_count', 0)}`")
+    else:
+        st.info("⚪ **Empty Workspace**\n\n0 patient samples loaded.")
+
+    st.divider()
+
+    # 3. Workspace Controls (Reset / Delete)
+    st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>⚙️ Workspace Actions</div>", unsafe_allow_html=True)
     if st.session_state.get('show_delete_confirm', False):
-        st.warning("⚠️ **Warning: Delete Active Dataset?**\nThis will permanently delete the current dataset and reset workspace to 0 samples. This action cannot be undone.")
+        st.warning("⚠️ **Delete Active Dataset?**\nResets workspace to 0 samples.")
         c_del1, c_del2 = st.columns(2)
         with c_del1:
             if st.button("🔴 Delete", type="primary", use_container_width=True, key="btn_sb_confirm_del"):
@@ -401,17 +488,8 @@ with st.sidebar:
             st.session_state['show_delete_confirm'] = True
             st.rerun()
 
-# Execute Pipeline
-df_raw = st.session_state['uploaded_df']
-mapped_tuple = tuple(sorted(st.session_state['mapped_cols'].items()))
-clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple)
-processed_df = full_results.get('processed_dataframe', pd.DataFrame())
-
-# Helper to check active dataset state
-def has_active_data() -> bool:
-    if full_results is None or 'overall' not in full_results:
-        return False
-    return full_results['overall'].get('sample_count', 0) > 0
+    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+    st.caption("💡 *Tip: Click the ◀ arrow at top-right of sidebar to minimize. When minimized, click the ▶ arrow at top-left of page to reopen.*")
 
 # -----------------------------------------------------------------------------
 # CYP2C19 COMBINATION & GEOGRAPHIC STUDIO (DOWNSIDE OF TAB 5)
