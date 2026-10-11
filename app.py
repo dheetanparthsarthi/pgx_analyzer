@@ -2322,10 +2322,37 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 st.warning(f"⚠️ Please select at least one biomarker for **{sel_map_gene}** from the dropdown above to map columns.")
             elif df_raw is not None and len(df_raw.columns) > 0:
                 all_cols = list(df_raw.columns)
+                demo_mapping = st.session_state.get('demographic_mapping', {})
+                confirmed_demo_cols = {v for k, v in demo_mapping.items() if v}
+
+                # Clean candidate genotype columns (exclude unnamed Excel columns & confirmed metadata)
+                genotype_cols = [
+                    c for c in all_cols 
+                    if not str(c).strip().startswith('Unnamed:') and c not in confirmed_demo_cols
+                ]
+                if not genotype_cols:
+                    genotype_cols = [c for c in all_cols if not str(c).strip().startswith('Unnamed:')]
+                if not genotype_cols:
+                    genotype_cols = all_cols
+
                 def find_default(patterns, cols):
+                    # 1. Exact case-insensitive match
                     for pattern in patterns:
                         for c in cols:
-                            if pattern.lower() in str(c).lower():
+                            if str(pattern).strip().lower() == str(c).strip().lower():
+                                return c
+                    # 2. Normalized match (remove spaces, parens, hyphens, asterisks)
+                    for pattern in patterns:
+                        p_norm = str(pattern).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
+                        if not p_norm: continue
+                        for c in cols:
+                            c_norm = str(c).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
+                            if p_norm == c_norm or p_norm in c_norm or c_norm in p_norm:
+                                return c
+                    # 3. Substring match
+                    for pattern in patterns:
+                        for c in cols:
+                            if str(pattern).lower() in str(c).lower():
                                 return c
                     return cols[0] if cols else ""
 
@@ -2333,6 +2360,32 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 # Render mapping controls ONLY for the selected markers
                 for idx, marker_label in enumerate(sel_map_markers):
+                    # Determine standard name and allele restrictions
+                    if "*2" in marker_label or "rs4244285" in marker_label:
+                        std_name = 'CYP2C19*2'
+                        ref_opts = ['G']
+                        var_opts = ['A']
+                        ref_help = "Curated wild-type reference allele (G) for CYP2C19*2"
+                        var_help = "Curated variant allele (A) for CYP2C19*2"
+                    elif "*3" in marker_label or "rs4986893" in marker_label:
+                        std_name = 'CYP2C19*3'
+                        ref_opts = ['G']
+                        var_opts = ['A']
+                        ref_help = "Curated wild-type reference allele (G) for CYP2C19*3"
+                        var_help = "Curated variant allele (A) for CYP2C19*3"
+                    elif "*17" in marker_label or "rs12248560" in marker_label:
+                        std_name = 'CYP2C19*17'
+                        ref_opts = ['C']
+                        var_opts = ['T']
+                        ref_help = "Curated wild-type reference allele (C) for CYP2C19*17"
+                        var_help = "Curated variant allele (T) for CYP2C19*17"
+                    else:
+                        std_name = marker_label.split(' ')[0]
+                        ref_opts = ['A', 'C', 'G', 'T']
+                        var_opts = ['A', 'C', 'G', 'T']
+                        ref_help = f"Select reference allele for {marker_label}"
+                        var_help = f"Select variant allele for {marker_label}"
+
                     st.markdown(f"""
                     <div class="clean-card-box">
                         <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">🧬 {marker_label}</h5>
@@ -2351,22 +2404,15 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     elif "*17" in marker_label or "rs12248560" in marker_label:
                         patterns_to_try.extend(['*17', 'cyp2c19*17', 'rs12248560', 'c.-806'])
 
-                    m_def = find_default(patterns_to_try, all_cols)
-                    def_idx = all_cols.index(m_def) if m_def in all_cols else min(idx % len(all_cols), len(all_cols) - 1)
+                    m_def = find_default(patterns_to_try, genotype_cols)
+                    def_idx = genotype_cols.index(m_def) if m_def in genotype_cols else min(idx % len(genotype_cols), len(genotype_cols) - 1)
 
-                    sel_col = c1_m.selectbox("Genotype column", all_cols, index=def_idx, key=f"w_map_col_{idx}")
-                    ref_val = c2_m.text_input("Reference allele", value="G" if "*2" in marker_label or "*3" in marker_label else ("C" if "*17" in marker_label else "A"), key=f"w_map_ref_{idx}")
-                    var_val = c3_m.text_input("Variant allele", value="A" if "*2" in marker_label or "*3" in marker_label else ("T" if "*17" in marker_label else "B"), key=f"w_map_var_{idx}")
+                    sel_col = c1_m.selectbox("Genotype column", genotype_cols, index=def_idx, key=f"w_map_col_{idx}", help="Select spreadsheet column containing calls for this marker")
+                    ref_val = c2_m.selectbox("Reference allele", ref_opts, index=0, key=f"w_map_ref_{idx}", help=ref_help)
+                    var_val = c3_m.selectbox("Variant allele", var_opts, index=0 if len(var_opts) == 1 else 1, key=f"w_map_var_{idx}", help=var_help)
 
-                    # Determine standard name
-                    if "*2" in marker_label or "rs4244285" in marker_label:
-                        std_name = 'CYP2C19*2'
-                    elif "*3" in marker_label or "rs4986893" in marker_label:
-                        std_name = 'CYP2C19*3'
-                    elif "*17" in marker_label or "rs12248560" in marker_label:
-                        std_name = 'CYP2C19*17'
-                    else:
-                        std_name = marker_label.split(' ')[0]
+                    if sel_col in mapped_marker_dict:
+                        st.error(f"⚠️ Column `{sel_col}` is already mapped to `{mapped_marker_dict[sel_col]['marker_label']}`. Please select distinct genotype columns.")
 
                     mapped_marker_dict[sel_col] = {
                         'std_name': std_name,
