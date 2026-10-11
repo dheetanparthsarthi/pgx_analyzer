@@ -22,6 +22,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import os
 import io
+from collections import Counter
+from scipy import stats
 
 from core.qc import DataQCEngine
 from core.stratification import DemographicStratifier
@@ -338,6 +340,15 @@ if 'mapped_cols' not in st.session_state:
 if 'datasets_dict' not in st.session_state:
     st.session_state['datasets_dict'] = {}
 
+if 'selected_gene' not in st.session_state:
+    st.session_state['selected_gene'] = 'CYP2C19'
+
+if 'selected_markers' not in st.session_state:
+    st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+
+if 'workflow_step' not in st.session_state:
+    st.session_state['workflow_step'] = '1 · Select Target'
+
 EMPTY_COLS = [
     'sample ID', 'Gender', 'Date of Birth', 'Native place ', 'State',
     'Test requested', 'Is their family lived at Native place for past 3 generations?',
@@ -350,12 +361,142 @@ if not st.session_state.get('is_deleted', False) and (st.session_state['uploaded
     if persisted_df is not None and len(persisted_df) > 0:
         st.session_state['uploaded_df'] = persisted_df
         if 'workflow_step' not in st.session_state:
-            st.session_state['workflow_step'] = '1 · Upload'
+            st.session_state['workflow_step'] = '1 · Select Target'
 
 if st.session_state['uploaded_df'] is None:
     st.session_state['uploaded_df'] = pd.DataFrame(columns=EMPTY_COLS)
 
 db_manager = DatabaseManager()
+
+@st.cache_data
+def load_marker_catalog() -> pd.DataFrame:
+    """Loads and caches the 100 genes and 147 biomarkers from List of markers_v1.xlsx."""
+    excel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "List of markers_v1.xlsx")
+    if os.path.exists(excel_path):
+        try:
+            df = pd.read_excel(excel_path)
+            df.columns = [str(c).strip() for c in df.columns]
+            df['Gene'] = df['Gene'].astype(str).str.strip()
+            df['Marker'] = df['Marker'].astype(str).str.strip()
+            return df
+        except Exception:
+            pass
+    return pd.DataFrame()
+
+def parse_maf_value(val) -> tuple[float, str]:
+    """Parses numeric MAF frequency and formatted string from raw excel value."""
+    if val is None or pd.isna(val) or str(val).strip().lower() in ['nan', 'none', '']:
+        return 0.0, "N/A"
+    s = str(val).strip()
+    is_pct = '%' in s
+    if '=' in s:
+        part = s.split('=')[-1].strip()
+        try:
+            return float(part), s
+        except Exception:
+            pass
+    clean_s = s.replace('~', '').replace('%', '').strip()
+    if '-' in clean_s:
+        try:
+            low, high = clean_s.split('-')
+            avg = (float(low) + float(high)) / 2.0
+            return avg / 100.0, s
+        except Exception:
+            pass
+    try:
+        f = float(clean_s)
+        if is_pct or f > 1.0:
+            return f / 100.0, s
+        return f, s
+    except Exception:
+        return 0.0, s
+
+def analyze_generic_marker(series: pd.Series, marker_name: str, ref_al: str = None, var_al: str = None) -> dict:
+    """Computes genotype counts, allele frequencies (p & q), and HWE for any marker."""
+    clean = series.dropna().astype(str).str.strip().str.upper()
+    clean = clean[~clean.isin(['', 'NAN', 'NONE', 'MISSING', 'UNKNOWN', 'NULL'])]
+    n = len(clean)
+    if n == 0:
+        return {
+            'valid_samples': 0,
+            'genotype_counts': {},
+            'allele_counts': {},
+            'allele_freqs': {},
+            'p': 0.0, 'q': 0.0,
+            'hwe_chi2': 0.0, 'hwe_p': 1.0,
+            'interpretation': 'No Data'
+        }
+    
+    gt_counts = dict(clean.value_counts())
+    all_alleles = Counter()
+    for gt, count in gt_counts.items():
+        clean_gt = gt.replace('/', '').replace('|', '').replace(' ', '')
+        if len(clean_gt) == 2:
+            all_alleles[clean_gt[0]] += count
+            all_alleles[clean_gt[1]] += count
+        elif len(clean_gt) == 1:
+            all_alleles[clean_gt[0]] += count * 2
+            
+    sorted_als = [al for al, _ in all_alleles.most_common()]
+    if not ref_al and len(sorted_als) > 0:
+        ref_al = sorted_als[0]
+    if not var_al and len(sorted_als) > 1:
+        var_al = sorted_als[1]
+    elif not var_al and len(sorted_als) == 1:
+        var_al = 'Var'
+        
+    tot_al = sum(all_alleles.values())
+    al_freqs = {al: round(c / tot_al, 4) for al, c in all_alleles.items()} if tot_al > 0 else {}
+    p = al_freqs.get(ref_al, 1.0)
+    q = al_freqs.get(var_al, 0.0)
+    
+    exp_wt = n * (p ** 2)
+    exp_het = n * (2 * p * q)
+    exp_var = n * (q ** 2)
+    
+    wt_gt = (ref_al + ref_al) if ref_al else ""
+    het_gt1 = (ref_al + var_al) if ref_al and var_al else ""
+    het_gt2 = (var_al + ref_al) if ref_al and var_al else ""
+    var_gt = (var_al + var_al) if var_al else ""
+    
+    obs_wt = gt_counts.get(wt_gt, 0)
+    obs_het = gt_counts.get(het_gt1, 0) + (gt_counts.get(het_gt2, 0) if het_gt1 != het_gt2 else 0)
+    obs_var = gt_counts.get(var_gt, 0)
+    
+    chi2 = 0.0
+    if exp_wt > 0: chi2 += ((obs_wt - exp_wt)**2) / exp_wt
+    if exp_het > 0: chi2 += ((obs_het - exp_het)**2) / exp_het
+    if exp_var > 0: chi2 += ((obs_var - exp_var)**2) / exp_var
+    
+    p_val = 1 - stats.chi2.cdf(chi2, df=1) if chi2 > 0 else 1.0
+    interp = "Departure from HWE (χ² ≥ 3.4)" if chi2 >= 3.4 else "In HWE"
+    
+    return {
+        'valid_samples': n,
+        'genotype_counts': gt_counts,
+        'allele_counts': dict(all_alleles),
+        'allele_freqs': al_freqs,
+        'ref_allele': ref_al,
+        'var_allele': var_al,
+        'p': p, 'q': q,
+        'hwe_chi2': round(chi2, 4),
+        'hwe_p': round(p_val, 4),
+        'interpretation': interp
+    }
+
+def inspect_uploaded_file(df: pd.DataFrame) -> dict:
+    """Checks for Sample ID (compulsory), Gender, and State in uploaded dataframe."""
+    sid_col = find_matching_gene_column('Sample_ID', df)
+    gen_col = find_matching_gene_column('Gender', df)
+    state_col = find_matching_gene_column('State', df)
+    return {
+        'has_sample_id': sid_col is not None,
+        'sample_id_col': sid_col,
+        'has_gender': gen_col is not None,
+        'gender_col': gen_col,
+        'has_state': state_col is not None,
+        'state_col': state_col
+    }
 
 def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
     """Finds best matching column for a given gene/SNP/demographic in a dataframe."""
@@ -439,7 +580,7 @@ def reset_all_data():
     st.session_state['pending_file_name'] = None
     st.session_state['merge_alignment_log'] = None
     st.session_state['show_delete_confirm'] = False
-    st.session_state['workflow_step'] = '1 · Upload'
+    st.session_state['workflow_step'] = '1 · Select Target'
     
     clear_active_dataset_cache()
 
@@ -1623,8 +1764,19 @@ def render_unified_results(full_results: dict, qc_report: dict):
 # 3-STEP WORKFLOW PIPELINE RENDERER (EXACT MATCH FOR USER SCREENSHOTS 1, 2, 3, 4, 5)
 # -----------------------------------------------------------------------------
 def render_workflow_pipeline(df_raw, full_results, qc_report):
-    if 'workflow_step' not in st.session_state:
-        st.session_state['workflow_step'] = '1 · Upload'
+    VALID_STEPS = ['1 · Select Target', '2 · Upload', '3 · Map columns', '4 · Results']
+    curr_step = st.session_state.get('workflow_step', '')
+    if curr_step not in VALID_STEPS:
+        if 'Target' in curr_step:
+            st.session_state['workflow_step'] = '1 · Select Target'
+        elif 'Upload' in curr_step:
+            st.session_state['workflow_step'] = '2 · Upload'
+        elif 'Map' in curr_step:
+            st.session_state['workflow_step'] = '3 · Map columns'
+        elif 'Result' in curr_step:
+            st.session_state['workflow_step'] = '4 · Results'
+        else:
+            st.session_state['workflow_step'] = '1 · Select Target'
 
     main_tab_home, main_tab_about = st.tabs(["🏠 Home Workspace", "ℹ️ About Platform"])
 
@@ -1734,31 +1886,132 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         st.markdown("<br>", unsafe_allow_html=True)
 
     with main_tab_home:
-        step_cols = st.columns(3)
-        t1 = "primary" if st.session_state['workflow_step'] == '1 · Upload' else "secondary"
-        t2 = "primary" if st.session_state['workflow_step'] == '2 · Map columns' else "secondary"
-        t3 = "primary" if st.session_state['workflow_step'] == '3 · Results' else "secondary"
+        step_cols = st.columns(4)
+        t1 = "primary" if st.session_state['workflow_step'] == '1 · Select Target' else "secondary"
+        t2 = "primary" if st.session_state['workflow_step'] == '2 · Upload' else "secondary"
+        t3 = "primary" if st.session_state['workflow_step'] == '3 · Map columns' else "secondary"
+        t4 = "primary" if st.session_state['workflow_step'] == '4 · Results' else "secondary"
 
-        if step_cols[0].button("1 · Upload", use_container_width=True, type=t1, key="nav_btn_step1"):
-            st.session_state['workflow_step'] = '1 · Upload'
+        if step_cols[0].button("1 · Select Target", use_container_width=True, type=t1, key="nav_btn_step1"):
+            st.session_state['workflow_step'] = '1 · Select Target'
             st.rerun()
 
-        if step_cols[1].button("2 · Map columns", use_container_width=True, type=t2, key="nav_btn_step2"):
-            st.session_state['workflow_step'] = '2 · Map columns'
+        if step_cols[1].button("2 · Upload", use_container_width=True, type=t2, key="nav_btn_step2"):
+            st.session_state['workflow_step'] = '2 · Upload'
             st.rerun()
 
-        if step_cols[2].button("3 · Results", use_container_width=True, type=t3, key="nav_btn_step3"):
-            st.session_state['workflow_step'] = '3 · Results'
+        if step_cols[2].button("3 · Map columns", use_container_width=True, type=t3, key="nav_btn_step3"):
+            st.session_state['workflow_step'] = '3 · Map columns'
+            st.rerun()
+
+        if step_cols[3].button("4 · Results", use_container_width=True, type=t4, key="nav_btn_step4"):
+            st.session_state['workflow_step'] = '4 · Results'
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
 
+        catalog_df = load_marker_catalog()
+
         # -------------------------------------------------------------------------
-        # STEP 1: UPLOAD (Matching Image 1)
+        # STEP 1: SELECT TARGET (GENE & BIOMARKERS)
         # -------------------------------------------------------------------------
-        if st.session_state['workflow_step'] == '1 · Upload':
-            st.markdown("## Upload genotype dataset")
-            st.caption('Excel (.xlsx/.csv) with one row per sample: Sample ID, Gender, DOB, region/location, and genotype columns for each SNP (e.g. "GA", "G/A", "AA").')
+        if st.session_state['workflow_step'] == '1 · Select Target':
+            st.markdown("## 1️⃣ Select Pharmacogenetic Target (Gene & Biomarkers)")
+            st.caption("Choose which gene and specific biomarker(s) to analyze. Only your selected markers will be uploaded, mapped, and visualized.")
+
+            target_mode = st.radio(
+                "Target Selection Mode:",
+                ["⭐ CYP2C19 Clinical Panel (Default / Featured)", "📚 Full Genomic Catalog (100 Genes & 147 Biomarkers)"],
+                index=0 if st.session_state.get('selected_gene') == 'CYP2C19' else 1,
+                horizontal=True,
+                key="target_mode_radio"
+            )
+
+            if "CYP2C19" in target_mode:
+                st.session_state['selected_gene'] = 'CYP2C19'
+                st.markdown("""
+                <div style="background: #FFFFFF; border: 1.5px solid #2563EB; border-radius: 10px; padding: 16px 20px; margin-top: 10px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(37,99,235,0.06);">
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <span style="font-size: 15px; font-weight: 700; color: #1E3A8A;">🧬 CYP2C19 Antiplatelet & PPI Clinical Panel</span>
+                        <span style="font-size: 11px; font-weight: 700; background: #DBEAFE; color: #1E40AF; padding: 3px 8px; border-radius: 6px;">CPIC Level 1A</span>
+                    </div>
+                    <p style="margin: 6px 0 0 0; font-size: 12px; color: #475569;">
+                        Select which CYP2C19 star alleles to include in this analysis. You can choose 1 marker, 2 markers, or all 3:
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+                col_cyp1, col_cyp2, col_cyp3 = st.columns(3)
+                with col_cyp1:
+                    cyp2_checked = st.checkbox("CYP2C19*2 (rs4244285 · c.681G>A)", value=any("*2" in m for m in st.session_state.get('selected_markers', [])), key="chk_cyp2")
+                with col_cyp2:
+                    cyp3_checked = st.checkbox("CYP2C19*3 (rs4986893 · c.636G>A)", value=any("*3" in m for m in st.session_state.get('selected_markers', [])), key="chk_cyp3")
+                with col_cyp3:
+                    cyp17_checked = st.checkbox("CYP2C19*17 (rs12248560 · c.-806C>T)", value=any("*17" in m for m in st.session_state.get('selected_markers', [])), key="chk_cyp17")
+
+                chosen_markers = []
+                if cyp2_checked: chosen_markers.append('CYP2C19*2 (rs4244285)')
+                if cyp3_checked: chosen_markers.append('CYP2C19*3 (rs4986893)')
+                if cyp17_checked: chosen_markers.append('CYP2C19*17 (rs12248560)')
+
+                if not chosen_markers:
+                    st.warning("⚠️ Please select at least one marker to continue.")
+                else:
+                    st.session_state['selected_markers'] = chosen_markers
+
+            else:
+                # Browse Full Catalog
+                gene_list = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
+                curr_gene = st.session_state.get('selected_gene', 'CYP2C19')
+                g_idx = gene_list.index(curr_gene) if curr_gene in gene_list else 0
+
+                c_g1, c_g2 = st.columns([1, 1.5])
+                with c_g1:
+                    sel_gene = st.selectbox("Select Target Gene (100 Available):", gene_list, index=g_idx, key="catalog_sel_gene")
+                    st.session_state['selected_gene'] = sel_gene
+
+                with c_g2:
+                    sub_markers = catalog_df[catalog_df['Gene'] == sel_gene]['Marker'].tolist() if not catalog_df.empty else []
+                    if not sub_markers:
+                        sub_markers = ['rs4244285', 'rs4986893', 'rs12248560'] if sel_gene == 'CYP2C19' else [f"{sel_gene}_marker1"]
+
+                    sel_markers = st.multiselect(
+                        f"Select Biomarkers for {sel_gene} (Select 1, 2, or more):",
+                        sub_markers,
+                        default=sub_markers[:min(2, len(sub_markers))],
+                        key="catalog_sel_markers"
+                    )
+                    st.session_state['selected_markers'] = sel_markers
+
+            # Active Target Summary Card
+            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+            active_gene = st.session_state.get('selected_gene', 'CYP2C19')
+            active_markers = st.session_state.get('selected_markers', [])
+            num_m = len(active_markers)
+
+            st.markdown(f"""
+            <div style="background: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 8px; padding: 12px 16px;">
+                <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B;">🎯 Active Configuration</div>
+                <div style="font-size: 14px; font-weight: 600; color: #0F172A; margin-top: 4px;">
+                    Gene: <span style="color: #2563EB;">{active_gene}</span> &nbsp;|&nbsp; 
+                    Selected Markers ({num_m}): <span style="color: #059669;">{', '.join(active_markers) if active_markers else 'None'}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            c_sp, c_next1 = st.columns([0.7, 0.3])
+            with c_next1:
+                if st.button("Continue to Upload Dataset →", type="primary", use_container_width=True, key="btn_step0_cont", disabled=num_m == 0):
+                    st.session_state['workflow_step'] = '2 · Upload'
+                    st.rerun()
+
+        # -------------------------------------------------------------------------
+        # STEP 2: UPLOAD DATASET (STRICT GATEKEEPER & VALIDATION CHECK)
+        # -------------------------------------------------------------------------
+        elif st.session_state['workflow_step'] == '2 · Upload':
+            st.markdown("## 2️⃣ Upload Genotype Dataset")
+            st.caption("Upload your spreadsheet (.xlsx, .xls, .csv). Compulsory fields (Sample ID, Gender, State) will be inspected immediately.")
 
             st.markdown("""
             <div class="upload-container-box">
@@ -1775,7 +2028,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     st.info(f"📂 **Active Workspace Data:** `{len(df_raw):,} samples` loaded.")
                 with c_act1:
                     if st.button("📊 View Current Results →", use_container_width=True, key="btn_step1_quick_res"):
-                        st.session_state['workflow_step'] = '3 · Results'
+                        st.session_state['workflow_step'] = '4 · Results'
                         st.rerun()
                 with c_act2:
                     if st.button("🗑️ Delete & Clear Data", use_container_width=True, key="btn_step1_quick_del"):
@@ -1793,22 +2046,59 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         else:
                             df_load = pd.read_excel(file_bytes)
                         
-                        if has_active_data():
-                            st.session_state['pending_new_df'] = df_load
-                            st.session_state['pending_file_id'] = uploaded_file_id
-                            st.session_state['pending_file_name'] = file_upload.name
+                        # POST-UPLOAD INSPECTION FOR COMPULSORY FIELDS
+                        chk_res = inspect_uploaded_file(df_load)
+                        
+                        if not chk_res['has_sample_id']:
+                            st.session_state['upload_error'] = (
+                                "🚫 **Upload Blocked: Mandatory 'Sample ID' column is missing!**\n\n"
+                                "A unique Sample ID (e.g. `Sample ID`, `sample_id`, `Patient ID`, `ID`) is strictly compulsory to track samples and calculate frequencies.\n\n"
+                                "**You cannot proceed without a Sample ID column.** Please add a Sample ID column to your spreadsheet and re-upload."
+                            )
+                            st.session_state['pending_new_df'] = None
                         else:
-                            clear_deletion_flag()
-                            st.session_state['last_uploaded_file_id'] = uploaded_file_id
-                            st.session_state['uploaded_df'] = df_load
-                            st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
-                            st.session_state['mapped_cols'] = {}
-                            st.session_state['workflow_step'] = '1 · Upload'
-                            save_active_dataset(df_load)
-                            st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns). Review below and click 'Continue to Map Columns →'.")
-                            st.rerun()
+                            st.session_state['upload_error'] = None
+                            st.session_state['upload_inspection'] = chk_res
+
+                            if has_active_data():
+                                st.session_state['pending_new_df'] = df_load
+                                st.session_state['pending_file_id'] = uploaded_file_id
+                                st.session_state['pending_file_name'] = file_upload.name
+                            else:
+                                clear_deletion_flag()
+                                st.session_state['last_uploaded_file_id'] = uploaded_file_id
+                                st.session_state['uploaded_df'] = df_load
+                                st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
+                                st.session_state['mapped_cols'] = {}
+                                save_active_dataset(df_load)
+                                st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns).")
+                                st.rerun()
                     except Exception as e:
                         st.error(f"Error loading file: {e}")
+
+            # Show Error Banner if Sample ID Missing
+            if st.session_state.get('upload_error'):
+                st.error(st.session_state['upload_error'])
+
+            # Show Audit Notices for Gender and State
+            if st.session_state.get('upload_inspection'):
+                insp = st.session_state['upload_inspection']
+                c_aud1, c_aud2, c_aud3 = st.columns(3)
+                with c_aud1:
+                    if insp['has_sample_id']:
+                        st.success(f"✅ **Sample ID:** `{insp['sample_id_col']}`")
+                    else:
+                        st.error("❌ **Sample ID:** Missing (Required)")
+                with c_aud2:
+                    if insp['has_gender']:
+                        st.success(f"✅ **Gender:** `{insp['gender_col']}`")
+                    else:
+                        st.warning("⚠️ **Gender:** Not detected (Gender breakdown skipped)")
+                with c_aud3:
+                    if insp['has_state']:
+                        st.success(f"✅ **State / Region:** `{insp['state_col']}`")
+                    else:
+                        st.warning("⚠️ **State:** Not detected (Regional breakdown skipped)")
 
             if st.session_state.get('pending_new_df') is not None:
                 pending_df = st.session_state['pending_new_df']
@@ -1828,7 +2118,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
-                        st.session_state['workflow_step'] = '1 · Upload'
                         save_active_dataset(merged_df)
                         st.success(f"✅ Successfully merged {len(pending_df):,} samples! Total dataset now contains {len(merged_df):,} samples.")
                         st.rerun()
@@ -1843,7 +2132,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
-                        st.session_state['workflow_step'] = '1 · Upload'
                         save_active_dataset(pending_df)
                         st.success(f"📁 Added '{pending_fname}' as a separate dataset for independent analysis!")
                         st.rerun()
@@ -1857,7 +2145,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
-                        st.session_state['workflow_step'] = '1 · Upload'
                         save_active_dataset(pending_df)
                         st.success(f"🆕 Replaced active workspace with '{pending_fname}' ({len(pending_df):,} samples).")
                         st.rerun()
@@ -1880,14 +2167,16 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             </div>
             """, unsafe_allow_html=True)
 
-            c_space, c_next = st.columns([0.7, 0.3])
+            c_back0, c_space, c_next = st.columns([0.25, 0.45, 0.3])
+            with c_back0:
+                if st.button("← Back to Select Target", use_container_width=True, key="btn_step1_back"):
+                    st.session_state['workflow_step'] = '1 · Select Target'
+                    st.rerun()
             with c_next:
-                if st.button("Continue to Map Columns →", type="primary", use_container_width=True, key="btn_step1_cont"):
-                    if has_active_data():
-                        st.session_state['workflow_step'] = '2 · Map columns'
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ Please upload a dataset file (.xlsx/.csv) before proceeding to column mapping.")
+                can_proceed = has_active_data() and not st.session_state.get('upload_error')
+                if st.button("Continue to Map Columns →", type="primary", use_container_width=True, key="btn_step1_cont", disabled=not can_proceed):
+                    st.session_state['workflow_step'] = '3 · Map columns'
+                    st.rerun()
 
             st.divider()
 
@@ -1910,9 +2199,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         st.rerun()
 
                 st.markdown("<br>", unsafe_allow_html=True)
-
                 st.markdown("#### ➕ Manual Sample Data Entry Form")
-                st.caption("Insert individual sample records. Validation rules: CYP2C19*2 accepts GG/GA/AA; CYP2C19*3 accepts GG only; CYP2C19*17 accepts CC/CT/TT.")
+                st.caption("Insert individual sample records.")
                 
                 with st.form("manual_sample_form_single", clear_on_submit=True):
                     f_c1, f_c2 = st.columns(2)
@@ -1959,24 +2247,21 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.session_state['uploaded_df'] = pd.DataFrame([new_row])
                         
                         save_active_dataset(st.session_state['uploaded_df'])
-                        st.session_state['workflow_step'] = '3 · Results'
+                        st.session_state['workflow_step'] = '4 · Results'
                         st.success(f"Sample {in_sid} added successfully!")
                         st.rerun()
 
-            st.markdown("""
-            <div class="footer-disclaimer-text">
-                PGx Pop MVP · CYP2C19 calling uses a simplified unphased-genotype heuristic — see notes in the CYP2C19 tab · Not for clinical use without independent validation.
-            </div>
-            """, unsafe_allow_html=True)
-
         # -------------------------------------------------------------------------
-        # STEP 2: MAP COLUMNS (Matching Image 2)
+        # STEP 3: MAP COLUMNS (SHOWS ONLY THE SELECTED MARKERS)
         # -------------------------------------------------------------------------
-        elif st.session_state['workflow_step'] == '2 · Map columns':
-            st.markdown("## Map your columns")
+        elif st.session_state['workflow_step'] == '3 · Map columns':
+            st.markdown("## 3️⃣ Map Your Columns")
             num_cols = len(df_raw.columns) if df_raw is not None else 0
             num_rows = len(df_raw) if df_raw is not None else 0
-            st.caption(f"Tell the analyzer which columns hold which field. Detected {num_cols} columns, {num_rows:,} rows.")
+            active_m_list = st.session_state.get('selected_markers', ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)'])
+            active_g = st.session_state.get('selected_gene', 'CYP2C19')
+
+            st.caption(f"Map detected columns to required fields. Showing ONLY the {len(active_m_list)} marker(s) you selected for gene **{active_g}**.")
 
             if df_raw is not None and len(df_raw.columns) > 0:
                 all_cols = list(df_raw.columns)
@@ -1997,70 +2282,232 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 sel_reg = c_m3.selectbox("Region / location column (optional)", ["(None)"] + all_cols, index=all_cols.index(region_def) + 1 if region_def in all_cols else 0)
 
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("### CYP2C19 SNP columns")
-                st.caption("Map up to three SNPs. For star-allele/diplotype/phenotype calling, map rs4244285 (*2), rs4986893 (*3) and rs12248560 (*17). Any SNP left as '- none -' is skipped (genotype/allele/HWE still run on whichever SNPs you do map).")
+                st.markdown(f"### 🧬 Selected Marker Columns ({active_g})")
+                st.caption(f"Mapping {len(active_m_list)} marker(s) selected in Step 1. Unselected markers are excluded.")
 
-                # Box 1: rs4244285 (*2)
-                st.markdown("""
-                <div class="clean-card-box">
-                    <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">rs4244285 (CYP2C19*2, c.681G>A)</h5>
-                </div>
-                """, unsafe_allow_html=True)
-                c1_1, c1_2, c1_3 = st.columns(3)
-                cyp2_def = find_default(['cyp2c19*2', 'rs4244285'], all_cols)
-                sel_cyp2 = c1_1.selectbox("Genotype column (*2)", all_cols, index=all_cols.index(cyp2_def) if cyp2_def in all_cols else 0, key="w_map_cyp2")
-                c1_2.text_input("Reference allele (*2)", value="G", key="w_map_ref2")
-                c1_3.text_input("Variant allele (*2)", value="A", key="w_map_var2")
+                mapped_marker_dict = {}
 
-                # Box 2: rs4986893 (*3)
-                st.markdown("""
-                <div class="clean-card-box">
-                    <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">rs4986893 (CYP2C19*3, c.636G>A)</h5>
-                </div>
-                """, unsafe_allow_html=True)
-                c2_1, c2_2, c2_3 = st.columns(3)
-                cyp3_def = find_default(['cyp2c19*3', 'rs4986893'], all_cols)
-                sel_cyp3 = c2_1.selectbox("Genotype column (*3)", all_cols, index=all_cols.index(cyp3_def) if cyp3_def in all_cols else 0, key="w_map_cyp3")
-                c2_2.text_input("Reference allele (*3)", value="G", key="w_map_ref3")
-                c2_3.text_input("Variant allele (*3)", value="A", key="w_map_var3")
+                # Render mapping controls ONLY for the selected markers
+                for idx, marker_label in enumerate(active_m_list):
+                    st.markdown(f"""
+                    <div class="clean-card-box">
+                        <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">{marker_label}</h5>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    c1_m, c2_m, c3_m = st.columns(3)
+                    
+                    # Pattern matching for auto-detection
+                    m_clean = marker_label.lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
+                    patterns_to_try = [marker_label, m_clean]
+                    if "*2" in marker_label or "rs4244285" in marker_label:
+                        patterns_to_try.extend(['*2', 'cyp2c19*2', 'rs4244285', 'c.681'])
+                    elif "*3" in marker_label or "rs4986893" in marker_label:
+                        patterns_to_try.extend(['*3', 'cyp2c19*3', 'rs4986893', 'c.636'])
+                    elif "*17" in marker_label or "rs12248560" in marker_label:
+                        patterns_to_try.extend(['*17', 'cyp2c19*17', 'rs12248560', 'c.-806'])
 
-                # Box 3: rs12248560 (*17)
-                st.markdown("""
-                <div class="clean-card-box">
-                    <h5 style="margin-top:0; color:#0F172A; font-family:-apple-system, sans-serif; font-weight:700;">rs12248560 (CYP2C19*17, c.-806C>T)</h5>
-                </div>
-                """, unsafe_allow_html=True)
-                c3_1, c3_2, c3_3 = st.columns(3)
-                cyp17_def = find_default(['cyp2c19*17', 'rs12248560'], all_cols)
-                sel_cyp17 = c3_1.selectbox("Genotype column (*17)", all_cols, index=all_cols.index(cyp17_def) if cyp17_def in all_cols else 0, key="w_map_cyp17")
-                c3_2.text_input("Reference allele (*17)", value="C", key="w_map_ref17")
-                c3_3.text_input("Variant allele (*17)", value="T", key="w_map_var17")
+                    m_def = find_default(patterns_to_try, all_cols)
+                    def_idx = all_cols.index(m_def) if m_def in all_cols else min(idx % len(all_cols), len(all_cols) - 1)
 
-                st.session_state['mapped_cols'] = {
-                    sel_sid: 'Sample_ID',
-                    sel_gen: 'Gender',
-                    sel_reg: 'Native_Place',
-                    sel_cyp2: 'CYP2C19*2',
-                    sel_cyp3: 'CYP2C19*3',
-                    sel_cyp17: 'CYP2C19*17'
-                }
+                    sel_col = c1_m.selectbox(f"Genotype column", all_cols, index=def_idx, key=f"w_map_col_{idx}")
+                    ref_val = c2_m.text_input(f"Reference allele", value="G" if "*2" in marker_label or "*3" in marker_label else ("C" if "*17" in marker_label else "A"), key=f"w_map_ref_{idx}")
+                    var_val = c3_m.text_input(f"Variant allele", value="A" if "*2" in marker_label or "*3" in marker_label else ("T" if "*17" in marker_label else "B"), key=f"w_map_var_{idx}")
+
+                    # Determine standard name
+                    if "*2" in marker_label or "rs4244285" in marker_label:
+                        std_name = 'CYP2C19*2'
+                    elif "*3" in marker_label or "rs4986893" in marker_label:
+                        std_name = 'CYP2C19*3'
+                    elif "*17" in marker_label or "rs12248560" in marker_label:
+                        std_name = 'CYP2C19*17'
+                    else:
+                        std_name = marker_label.split(' ')[0]
+
+                    mapped_marker_dict[sel_col] = std_name
+
+                # Build final column mapping
+                final_mapping = {sel_sid: 'Sample_ID'}
+                if sel_gen != "(None)":
+                    final_mapping[sel_gen] = 'Gender'
+                if sel_reg != "(None)":
+                    final_mapping[sel_reg] = 'Native_Place'
+                
+                final_mapping.update(mapped_marker_dict)
+                st.session_state['mapped_cols'] = final_mapping
 
             c_b1, c_b2, c_b3 = st.columns([0.25, 0.5, 0.25])
             with c_b1:
                 if st.button("← Back to Upload", use_container_width=True, key="btn_map_back"):
-                    st.session_state['workflow_step'] = '1 · Upload'
+                    st.session_state['workflow_step'] = '2 · Upload'
                     st.rerun()
             with c_b3:
                 if st.button("Continue to Results →", type="primary", use_container_width=True, key="btn_map_cont"):
-                    st.session_state['workflow_step'] = '3 · Results'
+                    # RETAIN ONLY SELECTED & MAPPED COLUMNS IN ACTIVE DATASET
+                    if df_raw is not None and not df_raw.empty and st.session_state['mapped_cols']:
+                        cols_to_keep = [c for c in df_raw.columns if c in st.session_state['mapped_cols']]
+                        if cols_to_keep:
+                            st.session_state['uploaded_df'] = df_raw[cols_to_keep].copy()
+                            save_active_dataset(st.session_state['uploaded_df'])
+
+                    st.session_state['workflow_step'] = '4 · Results'
                     st.rerun()
 
         # -------------------------------------------------------------------------
-        # STEP 3: RESULTS (Matching Images 3, 4, 5)
+        # STEP 4: RESULTS (GENE & BIOMARKER INTERACTIVE VISUALIZATION STUDIO)
         # -------------------------------------------------------------------------
-        elif st.session_state['workflow_step'] == '3 · Results':
-            st.markdown("## Overview")
-            render_unified_results(full_results, qc_report)
+        elif st.session_state['workflow_step'] == '4 · Results':
+            active_gene = st.session_state.get('selected_gene', 'CYP2C19')
+            active_markers = st.session_state.get('selected_markers', ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)'])
+
+            # -------------------------------------------------------------------------
+            # 1. TOP DYNAMIC SELECTOR: CHOOSE WHAT GENE & BIOMARKER TO SEE
+            # -------------------------------------------------------------------------
+            st.markdown("## 4️⃣ Results & Dynamic Pharmacogenomics Studio")
+            st.markdown("""
+            <div style="background: #FFFFFF; border: 1.5px solid #0F172A; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <div style="font-size: 14px; font-weight: 700; color: #0F172A; display: flex; align-items: center; justify-content: space-between;">
+                    <span>🔎 Select Target Gene and Biomarker to Visualize:</span>
+                    <span style="font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 8px; border-radius: 4px;">Dynamic View Engine</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            c_vg1, c_vg2 = st.columns([1, 1.5])
+            with c_vg1:
+                vis_gene = st.selectbox("Gene Target:", [active_gene], key="vis_sel_gene")
+            with c_vg2:
+                vis_marker = st.selectbox("Biomarker / Variant to Display:", active_markers, key="vis_sel_marker")
+
+            # Extract rsID or clean marker identifier
+            clean_rsid = vis_marker
+            for part in vis_marker.replace("(", " ").replace(")", " ").split():
+                if "rs" in part.lower():
+                    clean_rsid = part
+                    break
+                elif "*" in part:
+                    clean_rsid = part
+
+            # Lookup reference metrics in catalog_df
+            ref_row = None
+            if not catalog_df.empty:
+                matches = catalog_df[(catalog_df['Gene'].str.upper() == active_gene.upper()) & 
+                                     (catalog_df['Marker'].str.contains(clean_rsid, case=False, na=False))]
+                if matches.empty:
+                    matches = catalog_df[catalog_df['Gene'].str.upper() == active_gene.upper()]
+                if not matches.empty:
+                    ref_row = matches.iloc[0]
+
+            sa_maf_num, sa_maf_str = parse_maf_value(ref_row['SA MAF']) if ref_row is not None else (0.0, "N/A")
+            glob_maf_num, glob_maf_str = parse_maf_value(ref_row['MAF']) if ref_row is not None else (0.0, "N/A")
+            ev_tier = str(ref_row['Level of evidence']).strip() if ref_row is not None and not pd.isna(ref_row['Level of evidence']) else "L1"
+            pmid = str(ref_row['PubMed reference']).strip() if ref_row is not None and not pd.isna(ref_row['PubMed reference']) else "35034351"
+
+            # Compute live cohort stats for this variant from processed_df
+            # Match column name in processed_df
+            target_col = None
+            for c in processed_df.columns:
+                if clean_rsid.lower() in str(c).lower() or ("*2" in vis_marker and "*2" in str(c)) or ("*3" in vis_marker and "*3" in str(c)) or ("*17" in vis_marker and "*17" in str(c)):
+                    target_col = c
+                    break
+
+            live_res = None
+            if target_col and target_col in processed_df.columns:
+                live_res = analyze_generic_marker(processed_df[target_col], clean_rsid)
+
+            # RENDER DYNAMIC KPI CARDS FOR SELECTED BIOMARKER
+            k_v1, k_v2, k_v3, k_v4 = st.columns(4)
+            cohort_maf_pct = f"{(live_res['q'] * 100):.1f}%" if live_res and live_res['valid_samples'] > 0 else "N/A"
+            hwe_label = live_res['interpretation'] if live_res else "N/A"
+            hwe_color = "#DC2626" if "Departure" in hwe_label else "#166534"
+
+            card_st = "background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 12px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.03);"
+            lbl_st = "font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748B;"
+            val_st = "font-size: 15px; font-weight: 700; color: #0F172A; margin-top: 3px;"
+            sub_st = "font-size: 11px; color: #475569; margin-top: 2px;"
+
+            with k_v1:
+                st.markdown(f"""
+                <div style="{card_st}">
+                    <div style="{lbl_st}">Biomarker Focus</div>
+                    <div style="{val_st}">{vis_marker.split(' (')[0]}</div>
+                    <div style="{sub_st}"><span style="background: #EEF2FF; color: #4338CA; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Evidence {ev_tier}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
+            with k_v2:
+                st.markdown(f"""
+                <div style="{card_st}">
+                    <div style="{lbl_st}">Cohort MAF vs Reference</div>
+                    <div style="{val_st}">{cohort_maf_pct}</div>
+                    <div style="{sub_st}">SA Ref: <span style="font-weight: 600; color: #0284C7;">{sa_maf_str}</span> &nbsp;|&nbsp; Global: {glob_maf_str}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with k_v3:
+                st.markdown(f"""
+                <div style="{card_st}">
+                    <div style="{lbl_st}">Hardy-Weinberg Status</div>
+                    <div style="{val_st}"><span style="color: {hwe_color}; font-size: 14px;">{hwe_label}</span></div>
+                    <div style="{sub_st}">χ² Stat: {live_res['hwe_chi2'] if live_res else 0.0} (Threshold: 3.4)</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with k_v4:
+                pm_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid and pmid != 'nan' else "https://pubmed.ncbi.nlm.nih.gov/"
+                st.markdown(f"""
+                <div style="{card_st}">
+                    <div style="{lbl_st}">Clinical Research</div>
+                    <div style="{val_st}"><a href="{pm_url}" target="_blank" style="color: #2563EB; text-decoration: none;">PMID: {pmid} ↗</a></div>
+                    <div style="{sub_st}">PharmGKB / CPIC Guideline</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # DYNAMIC DUAL CHARTS FOR SELECTED BIOMARKER
+            st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+            c_ch1, c_ch2 = st.columns(2)
+
+            with c_ch1:
+                # Comparative MAF Chart: Cohort vs South Asian Reference vs Global Reference
+                c_val = live_res['q'] if live_res and live_res['valid_samples'] > 0 else 0.0
+                comp_data = [
+                    {'Population Source': 'Your Active Cohort', 'Minor Allele Frequency': c_val, 'Type': 'Active Cohort'},
+                    {'Population Source': 'South Asian Ref (SA MAF)', 'Minor Allele Frequency': sa_maf_num, 'Type': 'South Asian Ref'},
+                    {'Population Source': 'Global 1000G (MAF)', 'Minor Allele Frequency': glob_maf_num, 'Type': 'Global Ref'}
+                ]
+                fig_comp = px.bar(
+                    pd.DataFrame(comp_data),
+                    x='Population Source', y='Minor Allele Frequency',
+                    color='Type',
+                    text_auto='.3f',
+                    title=f"Comparative Allele Frequency ({clean_rsid})",
+                    color_discrete_map={'Active Cohort': '#2563EB', 'South Asian Ref': '#059669', 'Global Ref': '#D97706'}
+                )
+                fig_comp.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20), showlegend=False)
+                st.plotly_chart(fig_comp, use_container_width=True)
+
+            with c_ch2:
+                # Genotype Breakdown Donut Chart
+                if live_res and live_res['genotype_counts']:
+                    g_df = pd.DataFrame([{'Genotype': k, 'Count': v} for k, v in live_res['genotype_counts'].items() if v > 0])
+                    fig_gt_pie = px.pie(
+                        g_df, names='Genotype', values='Count', hole=0.45,
+                        title=f"Observed Genotype Frequencies ({clean_rsid})",
+                        color_discrete_sequence=['#16A34A', '#2563EB', '#DC2626', '#D97706']
+                    )
+                    fig_gt_pie.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                    st.plotly_chart(fig_gt_pie, use_container_width=True)
+                else:
+                    st.info("No genotype calls recorded for this marker.")
+
+            st.divider()
+
+            # Render Full 9-Tab Studio if CYP2C19 was selected and analyzed
+            if active_gene == 'CYP2C19':
+                st.markdown("### 🧩 Multi-Variant & Demographic Studio (CYP2C19)")
+                render_unified_results(full_results, qc_report)
+            else:
+                st.markdown(f"### 📊 Full Cohort Summary for {active_gene}")
+                if live_res and live_res['genotype_counts']:
+                    g_tbl = pd.DataFrame([{'Genotype Call': k, 'Sample Count (N)': v, 'Frequency (%)': f"{(v / live_res['valid_samples'] * 100):.1f}%"} for k, v in live_res['genotype_counts'].items()])
+                    st.table(g_tbl)
 
             st.divider()
             st.markdown("### Export")
@@ -2093,7 +2540,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
             with e_remap:
                 if st.button("← Re-map columns", use_container_width=True, key="btn_res_remap"):
-                    st.session_state['workflow_step'] = '2 · Map columns'
+                    st.session_state['workflow_step'] = '3 · Map columns'
                     st.rerun()
 
             st.markdown("""
