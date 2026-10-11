@@ -2499,156 +2499,150 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             active_markers = st.session_state.get('selected_markers', ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)'])
 
             # -------------------------------------------------------------------------
-            # 1. TOP DYNAMIC SELECTOR: CHOOSE WHAT GENE & BIOMARKER TO SEE
+            # 1. BIOMARKER RESULTS STUDIO (DISPLAYING MAPPED TARGETS DIRECTLY)
             # -------------------------------------------------------------------------
-            st.markdown("## 4️⃣ Results & Dynamic Pharmacogenomics Studio")
-            st.markdown("""
-            <div style="background: #FFFFFF; border: 1.5px solid #0F172A; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                <div style="font-size: 14px; font-weight: 700; color: #0F172A; display: flex; align-items: center; justify-content: space-between;">
-                    <span>🔎 Selected Target Gene and Biomarker Analysis:</span>
-                    <span style="font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 8px; border-radius: 4px;">Selected & Mapped Focus</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"## 4️⃣ Results Studio & Pharmacogenomics Analysis ({active_gene})")
 
-            c_vg1, c_vg2 = st.columns([1, 1.5])
-            with c_vg1:
-                vis_gene = st.selectbox("Gene Target:", [active_gene], index=0, key="vis_sel_gene")
-            with c_vg2:
-                vis_marker = st.selectbox("Biomarker / Variant to Display:", active_markers, key="vis_sel_marker")
+            def render_single_marker_kpis_and_charts(vis_marker: str, vis_gene: str, processed_df: pd.DataFrame, catalog_df: pd.DataFrame, key_pfx: str = ""):
+                # Extract rsID or clean marker identifier
+                clean_rsid = vis_marker
+                for part in vis_marker.replace("(", " ").replace(")", " ").split():
+                    if "rs" in part.lower():
+                        clean_rsid = part
+                        break
+                    elif "*" in part:
+                        clean_rsid = part
 
-            # Extract rsID or clean marker identifier
-            clean_rsid = vis_marker
-            for part in vis_marker.replace("(", " ").replace(")", " ").split():
-                if "rs" in part.lower():
-                    clean_rsid = part
-                    break
-                elif "*" in part:
-                    clean_rsid = part
+                # Lookup reference metrics in catalog_df
+                ref_row = None
+                if not catalog_df.empty:
+                    matches = catalog_df[(catalog_df['Gene'].str.upper() == vis_gene.upper()) & 
+                                         (catalog_df['Marker'].str.contains(clean_rsid, case=False, na=False))]
+                    if matches.empty:
+                        matches = catalog_df[catalog_df['Gene'].str.upper() == vis_gene.upper()]
+                    if not matches.empty:
+                        ref_row = matches.iloc[0]
 
-            # Lookup reference metrics in catalog_df
-            ref_row = None
-            if not catalog_df.empty:
-                matches = catalog_df[(catalog_df['Gene'].str.upper() == vis_gene.upper()) & 
-                                     (catalog_df['Marker'].str.contains(clean_rsid, case=False, na=False))]
-                if matches.empty:
-                    matches = catalog_df[catalog_df['Gene'].str.upper() == vis_gene.upper()]
-                if not matches.empty:
-                    ref_row = matches.iloc[0]
+                sa_maf_num, sa_maf_str = parse_maf_value(ref_row['SA MAF']) if ref_row is not None else (0.0, "N/A")
+                glob_maf_num, glob_maf_str = parse_maf_value(ref_row['MAF']) if ref_row is not None else (0.0, "N/A")
+                ev_tier = str(ref_row['Level of evidence']).strip() if ref_row is not None and not pd.isna(ref_row['Level of evidence']) else "L1"
+                pmid = str(ref_row['PubMed reference']).strip() if ref_row is not None and not pd.isna(ref_row['PubMed reference']) else "35034351"
 
-            sa_maf_num, sa_maf_str = parse_maf_value(ref_row['SA MAF']) if ref_row is not None else (0.0, "N/A")
-            glob_maf_num, glob_maf_str = parse_maf_value(ref_row['MAF']) if ref_row is not None else (0.0, "N/A")
-            ev_tier = str(ref_row['Level of evidence']).strip() if ref_row is not None and not pd.isna(ref_row['Level of evidence']) else "L1"
-            pmid = str(ref_row['PubMed reference']).strip() if ref_row is not None and not pd.isna(ref_row['PubMed reference']) else "35034351"
+                # Compute live cohort stats for this variant from processed_df
+                target_col = None
+                for c in processed_df.columns:
+                    if clean_rsid.lower() in str(c).lower() or ("*2" in vis_marker and "*2" in str(c)) or ("*3" in vis_marker and "*3" in str(c)) or ("*17" in vis_marker and "*17" in str(c)):
+                        target_col = c
+                        break
 
-            # Compute live cohort stats for this variant from processed_df
-            target_col = None
-            for c in processed_df.columns:
-                if clean_rsid.lower() in str(c).lower() or ("*2" in vis_marker and "*2" in str(c)) or ("*3" in vis_marker and "*3" in str(c)) or ("*17" in vis_marker and "*17" in str(c)):
-                    target_col = c
-                    break
+                live_res = None
+                if target_col and target_col in processed_df.columns:
+                    live_res = analyze_generic_marker(processed_df[target_col], clean_rsid)
 
-            live_res = None
-            if target_col and target_col in processed_df.columns:
-                live_res = analyze_generic_marker(processed_df[target_col], clean_rsid)
+                # RENDER DYNAMIC KPI CARDS FOR SELECTED BIOMARKER
+                k_v1, k_v2, k_v3, k_v4 = st.columns(4)
+                cohort_maf_pct = f"{(live_res['q'] * 100):.1f}%" if live_res and live_res['valid_samples'] > 0 else "N/A (Reference)"
+                hwe_label = live_res['interpretation'] if live_res else "Ref Catalog"
+                hwe_color = "#DC2626" if "Departure" in hwe_label else "#166534"
 
-            # RENDER DYNAMIC KPI CARDS FOR SELECTED BIOMARKER
-            k_v1, k_v2, k_v3, k_v4 = st.columns(4)
-            cohort_maf_pct = f"{(live_res['q'] * 100):.1f}%" if live_res and live_res['valid_samples'] > 0 else "N/A (Reference)"
-            hwe_label = live_res['interpretation'] if live_res else "Ref Catalog"
-            hwe_color = "#DC2626" if "Departure" in hwe_label else "#166534"
+                card_st = "background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 12px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.03);"
+                lbl_st = "font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748B;"
+                val_st = "font-size: 15px; font-weight: 700; color: #0F172A; margin-top: 3px;"
+                sub_st = "font-size: 11px; color: #475569; margin-top: 2px;"
 
-            card_st = "background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px 12px; height: 100%; box-shadow: 0 1px 2px rgba(0,0,0,0.03);"
-            lbl_st = "font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748B;"
-            val_st = "font-size: 15px; font-weight: 700; color: #0F172A; margin-top: 3px;"
-            sub_st = "font-size: 11px; color: #475569; margin-top: 2px;"
-
-            with k_v1:
-                st.markdown(f"""
-                <div style="{card_st}">
-                    <div style="{lbl_st}">Biomarker Focus ({vis_gene})</div>
-                    <div style="{val_st}">{vis_marker.split(' (')[0]}</div>
-                    <div style="{sub_st}"><span style="background: #EEF2FF; color: #4338CA; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Evidence {ev_tier}</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-            with k_v2:
-                st.markdown(f"""
-                <div style="{card_st}">
-                    <div style="{lbl_st}">Cohort MAF vs Reference</div>
-                    <div style="{val_st}">{cohort_maf_pct}</div>
-                    <div style="{sub_st}">SA Ref: <span style="font-weight: 600; color: #0284C7;">{sa_maf_str}</span> &nbsp;|&nbsp; Global: {glob_maf_str}</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with k_v3:
-                st.markdown(f"""
-                <div style="{card_st}">
-                    <div style="{lbl_st}">Hardy-Weinberg Status</div>
-                    <div style="{val_st}"><span style="color: {hwe_color}; font-size: 14px;">{hwe_label}</span></div>
-                    <div style="{sub_st}">χ² Stat: {live_res['hwe_chi2'] if live_res else 'N/A'} (Threshold: 3.4)</div>
-                </div>
-                """, unsafe_allow_html=True)
-            with k_v4:
-                pm_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid and pmid != 'nan' else "https://pubmed.ncbi.nlm.nih.gov/"
-                st.markdown(f"""
-                <div style="{card_st}">
-                    <div style="{lbl_st}">Clinical Research</div>
-                    <div style="{val_st}"><a href="{pm_url}" target="_blank" style="color: #2563EB; text-decoration: none;">PMID: {pmid} ↗</a></div>
-                    <div style="{sub_st}">PharmGKB / CPIC Guideline</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # DYNAMIC DUAL CHARTS FOR SELECTED BIOMARKER
-            st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
-            c_ch1, c_ch2 = st.columns(2)
-
-            with c_ch1:
-                # Comparative MAF Chart: Cohort vs South Asian Reference vs Global Reference
-                c_val = live_res['q'] if live_res and live_res['valid_samples'] > 0 else None
-                comp_data = []
-                if c_val is not None:
-                    comp_data.append({'Population Source': 'Your Active Cohort', 'Minor Allele Frequency': c_val, 'Type': 'Active Cohort'})
-                comp_data.extend([
-                    {'Population Source': 'South Asian Ref (SA MAF)', 'Minor Allele Frequency': sa_maf_num, 'Type': 'South Asian Ref'},
-                    {'Population Source': 'Global 1000G (MAF)', 'Minor Allele Frequency': glob_maf_num, 'Type': 'Global Ref'}
-                ])
-                fig_comp = px.bar(
-                    pd.DataFrame(comp_data),
-                    x='Population Source', y='Minor Allele Frequency',
-                    color='Type',
-                    text_auto='.3f',
-                    title=f"Comparative Allele Frequency ({clean_rsid} · {vis_gene})",
-                    color_discrete_map={'Active Cohort': '#2563EB', 'South Asian Ref': '#059669', 'Global Ref': '#D97706'}
-                )
-                fig_comp.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20), showlegend=False)
-                st.plotly_chart(fig_comp, use_container_width=True)
-
-            with c_ch2:
-                # Genotype Breakdown Donut Chart
-                if live_res and live_res['genotype_counts']:
-                    g_df = pd.DataFrame([{'Genotype': k, 'Count': v} for k, v in live_res['genotype_counts'].items() if v > 0])
-                    fig_gt_pie = px.pie(
-                        g_df, names='Genotype', values='Count', hole=0.45,
-                        title=f"Observed Genotype Frequencies ({clean_rsid})",
-                        color_discrete_sequence=['#16A34A', '#2563EB', '#DC2626', '#D97706']
-                    )
-                    fig_gt_pie.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
-                    st.plotly_chart(fig_gt_pie, use_container_width=True)
-                else:
-                    # Show Reference Population Card for markers without cohort calls
+                with k_v1:
                     st.markdown(f"""
-                    <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; padding: 18px 20px; height: 260px; display: flex; flex-direction: column; justify-content: center;">
-                        <div style="font-size: 13px; font-weight: 700; color: #1E293B;">📖 Reference Marker Profile ({vis_gene} · {clean_rsid})</div>
-                        <p style="font-size: 12px; color: #64748B; margin-top: 6px;">
-                            This marker is curated in the <strong>List of markers_v1.xlsx</strong> pharmacogenomics knowledgebase.
-                        </p>
-                        <div style="font-size: 12px; color: #334155; margin-top: 4px;">
-                            • <strong>Clinical Evidence:</strong> Tier {ev_tier} (CPIC Guideline)<br>
-                            • <strong>South Asian MAF:</strong> {sa_maf_str}<br>
-                            • <strong>Global 1000G MAF:</strong> {glob_maf_str}<br>
-                            • <strong>PubMed Citation:</strong> PMID {pmid}
-                        </div>
+                    <div style="{card_st}">
+                        <div style="{lbl_st}">Biomarker Focus ({vis_gene})</div>
+                        <div style="{val_st}">{vis_marker.split(' (')[0]}</div>
+                        <div style="{sub_st}"><span style="background: #EEF2FF; color: #4338CA; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Evidence {ev_tier}</span></div>
                     </div>
                     """, unsafe_allow_html=True)
+                with k_v2:
+                    st.markdown(f"""
+                    <div style="{card_st}">
+                        <div style="{lbl_st}">Cohort MAF vs Reference</div>
+                        <div style="{val_st}">{cohort_maf_pct}</div>
+                        <div style="{sub_st}">SA Ref: <span style="font-weight: 600; color: #0284C7;">{sa_maf_str}</span> &nbsp;|&nbsp; Global: {glob_maf_str}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with k_v3:
+                    st.markdown(f"""
+                    <div style="{card_st}">
+                        <div style="{lbl_st}">Hardy-Weinberg Status</div>
+                        <div style="{val_st}"><span style="color: {hwe_color}; font-size: 14px;">{hwe_label}</span></div>
+                        <div style="{sub_st}">χ² Stat: {live_res['hwe_chi2'] if live_res else 'N/A'} (Threshold: 3.4)</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with k_v4:
+                    pm_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid and pmid != 'nan' else "https://pubmed.ncbi.nlm.nih.gov/"
+                    st.markdown(f"""
+                    <div style="{card_st}">
+                        <div style="{lbl_st}">Clinical Research</div>
+                        <div style="{val_st}"><a href="{pm_url}" target="_blank" style="color: #2563EB; text-decoration: none;">PMID: {pmid} ↗</a></div>
+                        <div style="{sub_st}">PharmGKB / CPIC Guideline</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                # DYNAMIC DUAL CHARTS FOR SELECTED BIOMARKER
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+                c_ch1, c_ch2 = st.columns(2)
+
+                with c_ch1:
+                    c_val = live_res['q'] if live_res and live_res['valid_samples'] > 0 else None
+                    comp_data = []
+                    if c_val is not None:
+                        comp_data.append({'Population Source': 'Your Active Cohort', 'Minor Allele Frequency': c_val, 'Type': 'Active Cohort'})
+                    comp_data.extend([
+                        {'Population Source': 'South Asian Ref (SA MAF)', 'Minor Allele Frequency': sa_maf_num, 'Type': 'South Asian Ref'},
+                        {'Population Source': 'Global 1000G (MAF)', 'Minor Allele Frequency': glob_maf_num, 'Type': 'Global Ref'}
+                    ])
+                    fig_comp = px.bar(
+                        pd.DataFrame(comp_data),
+                        x='Population Source', y='Minor Allele Frequency',
+                        color='Type',
+                        text_auto='.3f',
+                        title=f"Comparative Allele Frequency ({clean_rsid} · {vis_gene})",
+                        color_discrete_map={'Active Cohort': '#2563EB', 'South Asian Ref': '#059669', 'Global Ref': '#D97706'}
+                    )
+                    fig_comp.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20), showlegend=False)
+                    st.plotly_chart(fig_comp, use_container_width=True, key=f"fig_comp_{key_pfx}_{clean_rsid}")
+
+                with c_ch2:
+                    if live_res and live_res['genotype_counts']:
+                        g_df = pd.DataFrame([{'Genotype': k, 'Count': v} for k, v in live_res['genotype_counts'].items() if v > 0])
+                        fig_gt_pie = px.pie(
+                            g_df, names='Genotype', values='Count', hole=0.45,
+                            title=f"Observed Genotype Frequencies ({clean_rsid})",
+                            color_discrete_sequence=['#16A34A', '#2563EB', '#DC2626', '#D97706']
+                        )
+                        fig_gt_pie.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                        st.plotly_chart(fig_gt_pie, use_container_width=True, key=f"fig_gt_pie_{key_pfx}_{clean_rsid}")
+                    else:
+                        st.markdown(f"""
+                        <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 8px; padding: 18px 20px; height: 260px; display: flex; flex-direction: column; justify-content: center;">
+                            <div style="font-size: 13px; font-weight: 700; color: #1E293B;">📖 Reference Marker Profile ({vis_gene} · {clean_rsid})</div>
+                            <p style="font-size: 12px; color: #64748B; margin-top: 6px;">
+                                This marker is curated in the <strong>List of markers_v1.xlsx</strong> pharmacogenomics knowledgebase.
+                            </p>
+                            <div style="font-size: 12px; color: #334155; margin-top: 4px;">
+                                • <strong>Clinical Evidence:</strong> Tier {ev_tier} (CPIC Guideline)<br>
+                                • <strong>South Asian MAF:</strong> {sa_maf_str}<br>
+                                • <strong>Global 1000G MAF:</strong> {glob_maf_str}<br>
+                                • <strong>PubMed Citation:</strong> PMID {pmid}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+            if len(active_markers) > 1:
+                m_tabs = st.tabs([f"🧬 {m.split(' (')[0]}" for m in active_markers])
+                for idx, m_label in enumerate(active_markers):
+                    with m_tabs[idx]:
+                        render_single_marker_kpis_and_charts(m_label, active_gene, processed_df, catalog_df, f"tab_{idx}")
+            elif len(active_markers) == 1:
+                render_single_marker_kpis_and_charts(active_markers[0], active_gene, processed_df, catalog_df, "single")
+            else:
+                st.info("No biomarkers mapped for results display.")
 
             st.divider()
 
