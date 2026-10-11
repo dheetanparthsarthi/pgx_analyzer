@@ -429,44 +429,26 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     st.markdown("### 🧩 CYP2C19 Combination & Geographic Studio")
     st.caption("Interactive multi-SNP genotype combinations, star-diplotype pairings, and state-wise / regional distribution matrices.")
 
-    # Control Panel
-    c_ctrl1, c_ctrl2, c_ctrl3 = st.columns(3)
-    
-    # 1. Geographic Level
-    with c_ctrl1:
+    # 1. Primary Filter Controls: Geography & Nomenclature
+    c_geo, c_nom = st.columns([1.2, 0.8])
+    with c_geo:
         default_scope_idx = 1 if "Geographical" in view_mode else 0
         geo_scope = st.radio(
-            "1️⃣ Geographic Aggregation:",
+            "1️⃣ Geographic Aggregation Level:",
             ["🌐 Overall Cohort", "🗺️ Geographical Regions", "📍 State-Wise Profiles"],
+            horizontal=True,
             index=default_scope_idx,
             key="studio_geo_scope"
         )
-
-    # 2. Combination / Metric Focus
-    with c_ctrl2:
-        default_focus_idx = 0 if "Combination" in view_mode else 0
-        combo_focus = st.radio(
-            "2️⃣ Combination Metric Focus:",
-            ["🧩 Multi-SNP Genotypes (*2 + *3 + *17)", "⭐ Star-Diplotypes (*1/*1, *1/*2...)", "💊 CPIC Phenotypes"],
-            index=default_focus_idx,
-            key="studio_combo_focus"
-        )
-
-    # 3. Nomenclature Format
-    with c_ctrl3:
+    with c_nom:
         nomenclature = st.radio(
-            "3️⃣ Nomenclature Format:",
-            ["🧬 Star-Allele (CYP2C19*2, *3, *17)", "🔬 Scientific rsID (rs4244285, rs4986893, rs12248560)"],
+            "2️⃣ Nomenclature Format:",
+            ["🧬 Star-Allele (*2, *3, *17)", "🔬 Scientific rsID (rs4244285, rs4986893, rs12248560)"],
+            horizontal=True,
             key="studio_nomenclature"
         )
 
     is_sci = "Scientific" in nomenclature
-
-    # Informational notice explaining scientific nomenclature when enabled
-    if is_sci:
-        st.info("🔬 **Scientific Nomenclature Active:** Displaying Reference SNP IDs: `rs4244285` (CYP2C19*2, c.681G>A), `rs4986893` (CYP2C19*3, c.636G>A), and `rs12248560` (CYP2C19*17, c.-806C>T) for academic research and publication export.")
-
-    state_col = 'State_Clean' if 'State_Clean' in processed_df.columns else ('State' if 'State' in processed_df.columns else None)
 
     # Scientific Diplotype label mapping dictionary
     SCI_DIPLOTYPE_MAP = {
@@ -482,315 +464,228 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
         '*3/*3': '*3/*3 (rs4986893-AA)'
     }
 
-    # Optional Drill-Down Selector
-    sel_drilldown = "ALL"
-    target_df = processed_df.copy()
+    state_col = 'State_Clean' if 'State_Clean' in processed_df.columns else ('State' if 'State' in processed_df.columns else None)
 
-    if geo_scope == "🗺️ Geographical Regions":
-        avail_regions = [r for r in ['South India', 'North India', 'East India', 'West India', 'Central India'] if 'Region' in processed_df.columns and r in processed_df['Region'].values]
-        reg_options = ["🌐 (All Regions Matrix & Comparison)"] + avail_regions
-        sel_reg_str = st.selectbox("🗺️ Select Geographic Region Drill-Down:", reg_options, key="studio_reg_select")
-        if sel_reg_str != "🌐 (All Regions Matrix & Comparison)":
-            target_df = target_df[target_df['Region'] == sel_reg_str]
-            sel_drilldown = sel_reg_str
+    if is_sci:
+        st.info("🔬 **Scientific Nomenclature Active:** Displaying NCBI Reference SNP IDs: `rs4244285` (CYP2C19*2), `rs4986893` (CYP2C19*3), and `rs12248560` (CYP2C19*17).")
 
-    elif geo_scope == "📍 State-Wise Profiles":
-        if state_col:
-            avail_states = sorted([str(s) for s in processed_df[state_col].dropna().unique() if str(s).strip() and str(s).lower() != 'nan'])
-            state_options = ["📍 (All States Matrix & Comparison)"] + avail_states
-            sel_state_str = st.selectbox("📍 Select State Drill-Down:", state_options, key="studio_state_select")
-            if sel_state_str != "📍 (All States Matrix & Comparison)":
-                target_df = target_df[target_df[state_col] == sel_state_str]
-                sel_drilldown = sel_state_str
+    # 2. Genotype & Combination Selection Mode
+    st.markdown("<br>", unsafe_allow_html=True)
+    sel_mode = st.radio(
+        "3️⃣ Choose Genotype / Combination Selection Mode:",
+        [
+            "🔬 By Individual SNP Genotypes (*2, *3, *17)",
+            "⭐ By Star-Diplotype (*1/*1, *1/*2...)",
+            "💊 By CPIC Phenotype (NM, IM, PM...)"
+        ],
+        horizontal=True,
+        key="studio_filter_mode"
+    )
+
+    # 3. Interactive Dropdowns based on Mode
+    filtered_df = processed_df.copy()
+    filter_description = "All Cohort Samples"
+    is_filtered = False
+
+    if sel_mode == "🔬 By Individual SNP Genotypes (*2, *3, *17)":
+        g_c1, g_c2, g_c3 = st.columns(3)
+        with g_c1:
+            lbl_g2 = "rs4244285 (*2) Genotype:" if is_sci else "CYP2C19*2 Genotype:"
+            opts_g2 = ["(All)"] + sorted(list(processed_df['CYP2C19*2'].dropna().unique()))
+            sel_g2 = st.selectbox(lbl_g2, opts_g2, key="sel_filter_g2")
+            if sel_g2 != "(All)":
+                filtered_df = filtered_df[filtered_df['CYP2C19*2'] == sel_g2]
+                is_filtered = True
+
+        with g_c2:
+            lbl_g3 = "rs4986893 (*3) Genotype:" if is_sci else "CYP2C19*3 Genotype:"
+            opts_g3 = ["(All)"] + sorted(list(processed_df['CYP2C19*3'].dropna().unique()))
+            sel_g3 = st.selectbox(lbl_g3, opts_g3, key="sel_filter_g3")
+            if sel_g3 != "(All)":
+                filtered_df = filtered_df[filtered_df['CYP2C19*3'] == sel_g3]
+                is_filtered = True
+
+        with g_c3:
+            lbl_g17 = "rs12248560 (*17) Genotype:" if is_sci else "CYP2C19*17 Genotype:"
+            opts_g17 = ["(All)"] + sorted(list(processed_df['CYP2C19*17'].dropna().unique()))
+            sel_g17 = st.selectbox(lbl_g17, opts_g17, key="sel_filter_g17")
+            if sel_g17 != "(All)":
+                filtered_df = filtered_df[filtered_df['CYP2C19*17'] == sel_g17]
+                is_filtered = True
+
+        filter_parts = []
+        if sel_g2 != "(All)": filter_parts.append(f"*2: {sel_g2}")
+        if sel_g3 != "(All)": filter_parts.append(f"*3: {sel_g3}")
+        if sel_g17 != "(All)": filter_parts.append(f"*17: {sel_g17}")
+        if filter_parts:
+            filter_description = " + ".join(filter_parts)
+
+    elif sel_mode == "⭐ By Star-Diplotype (*1/*1, *1/*2...)":
+        all_dips = sorted([str(d) for d in processed_df['Diplotype'].dropna().unique() if str(d).strip()])
+        sel_dip = st.selectbox("⭐ Select Star-Diplotype:", ["(All Diplotypes)"] + all_dips, key="sel_filter_dip")
+        if sel_dip != "(All Diplotypes)":
+            filtered_df = filtered_df[filtered_df['Diplotype'] == sel_dip]
+            is_filtered = True
+            filter_description = f"Diplotype {sel_dip}"
+
+    else: # CPIC Phenotypes
+        all_phes = ['Normal Metabolizer', 'Intermediate Metabolizer', 'Rapid Metabolizer', 'Poor Metabolizer', 'Ultrarapid Metabolizer']
+        opts_phes = ["(All Phenotypes)"] + [p for p in all_phes if p in processed_df['Phenotype'].values]
+        sel_phe = st.selectbox("💊 Select CPIC Phenotype:", opts_phes, key="sel_filter_phe")
+        if sel_phe != "(All Phenotypes)":
+            filtered_df = filtered_df[filtered_df['Phenotype'] == sel_phe]
+            is_filtered = True
+            filter_description = f"Phenotype {sel_phe}"
+
+    # Filter status bar
+    n_filt = len(filtered_df)
+    n_tot = len(processed_df)
+    pct_filt = (n_filt / n_tot * 100) if n_tot > 0 else 0.0
+
+    if is_filtered:
+        st.success(f"🎯 **Active Genotype Filter:** `{filter_description}` — **{n_filt:,} of {n_tot:,} samples ({pct_filt:.1f}%)**")
+    else:
+        st.info("ℹ️ **No Genotype Filter Applied:** Showing all cohort samples (N=1,044). Use dropdowns above to filter.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # INTERACTIVE DRAG-DOWN INSPECTION SELECTOR
+    # RENDER VIEWS ACCORDING TO GEOGRAPHIC LEVEL
     # -------------------------------------------------------------------------
-    c_sub1, c_sub2 = st.columns([1.1, 0.9])
-    selected_inspect_val = "(All)"
 
-    with c_sub1:
-        if "Star-Diplotypes" in combo_focus:
-            all_dips = sorted([str(d) for d in target_df['Diplotype'].dropna().unique() if str(d).strip()])
-            dip_choices = ["(All Diplotypes / Overview)"] + all_dips
-            sel_dip_choice = st.selectbox(
-                "⭐ Select Star-Diplotype to Inspect (Dropdown):",
-                dip_choices,
-                key="studio_dip_inspect_choice"
+    # VIEW A: GEOGRAPHICAL REGIONS
+    if geo_scope == "🗺️ Geographical Regions":
+        st.markdown(f"#### 🌐 Regional Distribution for `{filter_description}`")
+        if 'Region' in processed_df.columns:
+            standard_regs = ['South India', 'North India', 'East India', 'West India', 'Central India']
+            reg_rows = []
+            for r in standard_regs:
+                tot_reg = len(processed_df[processed_df['Region'] == r])
+                match_reg = len(filtered_df[filtered_df['Region'] == r])
+                pct_within_reg = (match_reg / tot_reg * 100) if tot_reg > 0 else 0.0
+                pct_of_filter = (match_reg / n_filt * 100) if n_filt > 0 else 0.0
+                
+                # Diplotypes and phenotypes present
+                dips_reg = ", ".join(filtered_df[filtered_df['Region'] == r]['Diplotype'].unique()) if match_reg > 0 else "-"
+                phes_reg = ", ".join(filtered_df[filtered_df['Region'] == r]['Phenotype'].unique()) if match_reg > 0 else "-"
+
+                reg_rows.append({
+                    'Region': r,
+                    'Matching Samples (N)': match_reg,
+                    'Total Region Size (N)': tot_reg,
+                    'Frequency in Region (%)': f"{pct_within_reg:.1f}%",
+                    '% of Filter Cohort': f"{pct_of_filter:.1f}%",
+                    'Associated Diplotypes': dips_reg,
+                    'CPIC Phenotypes': phes_reg
+                })
+
+            reg_summary_df = pd.DataFrame(reg_rows)
+
+            c_reg_t, c_reg_fig = st.columns([1.2, 0.8])
+            with c_reg_t:
+                st.dataframe(reg_summary_df, use_container_width=True, hide_index=True)
+            with c_reg_fig:
+                fig_reg_bar = px.bar(
+                    reg_summary_df, x='Region', y='Matching Samples (N)',
+                    title=f"Regional Counts ({filter_description})",
+                    color='Region',
+                    color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488']
+                )
+                fig_reg_bar.update_layout(height=300, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_reg_bar, use_container_width=True)
+
+            # Cross-tabulation matrix if multiple diplotypes present
+            if len(filtered_df['Diplotype'].unique()) > 1:
+                st.markdown(f"**Regional Diplotype Cross-Tabulation Matrix for `{filter_description}`:**")
+                pivot_r = pd.crosstab(filtered_df['Region'], filtered_df['Diplotype'], margins=True, margins_name="Total")
+                if is_sci:
+                    pivot_r = pivot_r.rename(columns=lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
+                st.dataframe(pivot_r, use_container_width=True)
+
+    # VIEW B: STATE-WISE PROFILES
+    elif geo_scope == "📍 State-Wise Profiles":
+        st.markdown(f"#### 📍 State-Wise Distribution for `{filter_description}`")
+        if state_col and state_col in processed_df.columns:
+            st_counts = filtered_df[state_col].value_counts().reset_index()
+            st_counts.columns = ['State', 'Matching Samples (N)']
+            st_counts['Total State Cohort'] = st_counts['State'].apply(lambda s: len(processed_df[processed_df[state_col] == s]))
+            st_counts['Frequency in State (%)'] = st_counts.apply(
+                lambda r: f"{(r['Matching Samples (N)'] / r['Total State Cohort'] * 100):.1f}%" if r['Total State Cohort'] > 0 else "0%",
+                axis=1
             )
-            if sel_dip_choice != "(All Diplotypes / Overview)":
-                selected_inspect_val = sel_dip_choice
-
-        elif "CPIC Phenotypes" in combo_focus:
-            order_phes = ['Normal Metabolizer', 'Intermediate Metabolizer', 'Rapid Metabolizer', 'Poor Metabolizer', 'Ultrarapid Metabolizer']
-            avail_phes = [p for p in order_phes if p in target_df['Phenotype'].values]
-            for p in sorted(target_df['Phenotype'].dropna().unique()):
-                if p not in avail_phes:
-                    avail_phes.append(p)
-            phe_choices = ["(All CPIC Phenotypes / Overview)"] + avail_phes
-            sel_phe_choice = st.selectbox(
-                "💊 Select CPIC Phenotype to Inspect (Dropdown):",
-                phe_choices,
-                key="studio_phe_inspect_choice"
+            # Map Region
+            st_counts['Geographic Region'] = st_counts['State'].apply(
+                lambda s: processed_df[processed_df[state_col] == s]['Region'].iloc[0] if len(processed_df[processed_df[state_col] == s]) > 0 else 'Unknown'
             )
-            if sel_phe_choice != "(All CPIC Phenotypes / Overview)":
-                selected_inspect_val = sel_phe_choice
 
-        else: # Multi-SNP Genotypes
-            snp_cols = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in target_df.columns]
-            if snp_cols:
-                combo_series = target_df.apply(
-                    lambda r: f"{r['CYP2C19*2']} + {r['CYP2C19*3']} + {r['CYP2C19*17']}  ->  {r.get('Diplotype', '')} ({r.get('Phenotype', '')})",
-                    axis=1
-                )
-                unique_combos = sorted(list(combo_series.unique()))
-                combo_choices = ["(All Multi-SNP Combinations / Overview)"] + unique_combos
-                sel_combo_choice = st.selectbox(
-                    "🧩 Select Multi-SNP Combination to Inspect (Dropdown):",
-                    combo_choices,
-                    key="studio_combo_inspect_choice"
-                )
-                if sel_combo_choice != "(All Multi-SNP Combinations / Overview)":
-                    selected_inspect_val = sel_combo_choice
-
-    with c_sub2:
-        if selected_inspect_val != "(All)":
-            st.success(f"🎯 **Target Inspected:** `{selected_inspect_val}`")
-        else:
-            st.info("ℹ️ Displaying complete cohort overview. Select an item from the dropdown to zoom in.")
-
-    # -------------------------------------------------------------------------
-    # CASE 1: SPECIFIC ITEM INSPECTED VIA DRAG-DOWN DROPDOWN
-    # -------------------------------------------------------------------------
-    if selected_inspect_val != "(All)":
-        if "Star-Diplotypes" in combo_focus:
-            sub_df = target_df[target_df['Diplotype'] == selected_inspect_val]
-            n_sub = len(sub_df)
-            pct_sub = (n_sub / len(target_df) * 100) if len(target_df) > 0 else 0.0
-            phe_val = sub_df['Phenotype'].iloc[0] if not sub_df.empty else 'N/A'
-            dip_disp = SCI_DIPLOTYPE_MAP.get(selected_inspect_val, selected_inspect_val) if is_sci else selected_inspect_val
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Inspected Diplotype", dip_disp)
-            m2.metric("Sample Count (N)", f"{n_sub:,}")
-            m3.metric("Cohort Frequency", f"{pct_sub:.1f}%")
-            m4.metric("CPIC Phenotype", phe_val)
-
-            c_c1, c_c2 = st.columns([1.1, 0.9])
-            with c_c1:
-                st.markdown(f"**Underlying Multi-SNP Genotypes for `{dip_disp}`:**")
-                snp_cols = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in sub_df.columns]
-                combo_t = sub_df.groupby(snp_cols + ['Diplotype', 'Phenotype'], dropna=False).size().reset_index(name='Count (N)')
-                combo_t['% in Diplotype'] = combo_t['Count (N)'].apply(lambda x: f"{(x / n_sub * 100):.1f}%" if n_sub>0 else "0%")
-                if is_sci:
-                    combo_t = combo_t.rename(columns={'CYP2C19*2': 'rs4244285 (*2)', 'CYP2C19*3': 'rs4986893 (*3)', 'CYP2C19*17': 'rs12248560 (*17)'})
-                st.dataframe(combo_t, use_container_width=True, hide_index=True)
-            with c_c2:
-                if 'Region' in sub_df.columns:
-                    reg_t = sub_df['Region'].value_counts().reset_index()
-                    reg_t.columns = ['Region', 'Samples (N)']
-                    fig_sub = px.bar(reg_t, x='Region', y='Samples (N)', title=f"Geographical Distribution of {dip_disp}", color='Region', color_discrete_sequence=px.colors.qualitative.Set2)
-                    fig_sub.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
-                    st.plotly_chart(fig_sub, use_container_width=True)
-
-        elif "CPIC Phenotypes" in combo_focus:
-            sub_df = target_df[target_df['Phenotype'] == selected_inspect_val]
-            n_sub = len(sub_df)
-            pct_sub = (n_sub / len(target_df) * 100) if len(target_df) > 0 else 0.0
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Inspected CPIC Phenotype", selected_inspect_val)
-            m2.metric("Total Patients (N)", f"{n_sub:,}")
-            m3.metric("Cohort Percentage", f"{pct_sub:.1f}%")
-
-            c_c1, c_c2 = st.columns([1.1, 0.9])
-            with c_c1:
-                st.markdown(f"**Constituent Diplotypes Comprising `{selected_inspect_val}`:**")
-                dip_t = sub_df['Diplotype'].value_counts().reset_index()
-                dip_t.columns = ['Diplotype', 'Count (N)']
-                dip_t['% of Phenotype'] = dip_t['Count (N)'].apply(lambda x: f"{(x / n_sub * 100):.1f}%" if n_sub>0 else "0%")
-                if is_sci:
-                    dip_t['Diplotype'] = dip_t['Diplotype'].apply(lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
-                st.dataframe(dip_t, use_container_width=True, hide_index=True)
-            with c_c2:
-                fig_sub = px.pie(dip_t, names='Diplotype', values='Count (N)', hole=0.4, title=f"Diplotype Makeup of {selected_inspect_val}", color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B'])
-                fig_sub.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
-                st.plotly_chart(fig_sub, use_container_width=True)
-
-        else: # Specific Multi-SNP Genotype Combination
-            pattern_prefix = selected_inspect_val.split("  ->  ")[0].strip()
-            s_parts = [p.strip() for p in pattern_prefix.split("+")]
-            if len(s_parts) == 3:
-                sub_df = target_df[
-                    (target_df['CYP2C19*2'] == s_parts[0]) &
-                    (target_df['CYP2C19*3'] == s_parts[1]) &
-                    (target_df['CYP2C19*17'] == s_parts[2])
-                ]
-            else:
-                sub_df = target_df
-            
-            n_sub = len(sub_df)
-            pct_sub = (n_sub / len(target_df) * 100) if len(target_df) > 0 else 0.0
-            dip_val = sub_df['Diplotype'].iloc[0] if not sub_df.empty else 'N/A'
-            phe_val = sub_df['Phenotype'].iloc[0] if not sub_df.empty else 'N/A'
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Genotype Pattern", pattern_prefix)
-            m2.metric("Assigned Diplotype", SCI_DIPLOTYPE_MAP.get(dip_val, dip_val) if is_sci else dip_val)
-            m3.metric("CPIC Phenotype", phe_val)
-            m4.metric("Patients (N) / %", f"{n_sub:,} ({pct_sub:.1f}%)")
-
-            c_c1, c_c2 = st.columns([1.1, 0.9])
-            with c_c1:
-                st.markdown(f"**Geographic Breakdown for `{pattern_prefix}`:**")
-                group_cols = [c for c in ['Region', state_col] if c and c in sub_df.columns]
-                if group_cols:
-                    loc_t = sub_df.groupby(group_cols).size().reset_index(name='Patients (N)')
-                    loc_t = loc_t.sort_values(by='Patients (N)', ascending=False)
-                    st.dataframe(loc_t, use_container_width=True, hide_index=True)
-            with c_c2:
-                if 'Region' in sub_df.columns:
-                    reg_t = sub_df['Region'].value_counts().reset_index()
-                    reg_t.columns = ['Region', 'Patients (N)']
-                    fig_sub = px.bar(reg_t, x='Region', y='Patients (N)', title="Regional Distribution", color='Region')
-                    fig_sub.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
-                    st.plotly_chart(fig_sub, use_container_width=True)
-
-    # -------------------------------------------------------------------------
-    # CASE 2: OVERVIEW ACROSS REGIONS OR STATES (WHEN (All) IS SELECTED)
-    # -------------------------------------------------------------------------
-    elif geo_scope == "🗺️ Geographical Regions" and sel_drilldown == "ALL":
-        st.markdown("#### 🌐 Regional Pharmacogenomic Cross-Tabulation Matrix")
-        if 'Region' in processed_df.columns and 'Diplotype' in processed_df.columns:
-            if "Star-Diplotypes" in combo_focus or "Multi-SNP" in combo_focus:
-                pivot_dip = pd.crosstab(processed_df['Region'], processed_df['Diplotype'], margins=True, margins_name="Total")
-                if is_sci:
-                    pivot_dip = pivot_dip.rename(columns=lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
-                st.markdown("**Regional Diplotype Breakdown Matrix:**")
-                st.dataframe(pivot_dip, use_container_width=True)
-
-                chart_df = processed_df.groupby(['Region', 'Diplotype']).size().reset_index(name='Sample Count')
-                if is_sci:
-                    chart_df['Diplotype'] = chart_df['Diplotype'].apply(lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
-                fig_reg = px.bar(
-                    chart_df, x='Region', y='Sample Count', color='Diplotype',
-                    barmode='stack', title="Regional Diplotype Composition (Stacked)",
-                    color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8']
-                )
-                fig_reg.update_layout(height=340, margin=dict(l=20, r=20, t=35, b=20))
-                st.plotly_chart(fig_reg, use_container_width=True)
-
-            if "CPIC Phenotypes" in combo_focus or "Multi-SNP" in combo_focus:
-                pivot_phe = pd.crosstab(processed_df['Region'], processed_df['Phenotype'], margins=True, margins_name="Total")
-                st.markdown("**Regional CPIC Phenotype Classification Matrix:**")
-                st.dataframe(pivot_phe, use_container_width=True)
-
-    elif geo_scope == "📍 State-Wise Profiles" and sel_drilldown == "ALL":
-        st.markdown("#### 📍 State-Wise Pharmacogenomic Cross-Tabulation Matrix")
-        if state_col and 'Diplotype' in processed_df.columns:
-            if "Star-Diplotypes" in combo_focus or "Multi-SNP" in combo_focus:
-                pivot_st_dip = pd.crosstab(processed_df[state_col], processed_df['Diplotype'], margins=True, margins_name="Total")
-                if is_sci:
-                    pivot_st_dip = pivot_st_dip.rename(columns=lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
-                st.markdown("**State-Wise Diplotype Breakdown Matrix:**")
-                st.dataframe(pivot_st_dip, use_container_width=True)
-
-                st_counts = processed_df[state_col].value_counts().reset_index()
-                st_counts.columns = ['State', 'Total Samples']
-                fig_state = px.bar(
-                    st_counts, x='State', y='Total Samples',
-                    title="Sample Distribution Across Indian States",
-                    color='Total Samples',
+            c_st_t, c_st_fig = st.columns([1.2, 0.8])
+            with c_st_t:
+                st.dataframe(st_counts, use_container_width=True, hide_index=True)
+            with c_st_fig:
+                fig_st_bar = px.bar(
+                    st_counts.head(10), x='State', y='Matching Samples (N)',
+                    title=f"Top States ({filter_description})",
+                    color='Matching Samples (N)',
                     color_continuous_scale='Greens'
                 )
-                fig_state.update_layout(height=340, margin=dict(l=20, r=20, t=35, b=20))
-                st.plotly_chart(fig_state, use_container_width=True)
+                fig_st_bar.update_layout(height=300, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_st_bar, use_container_width=True)
 
-            if "CPIC Phenotypes" in combo_focus or "Multi-SNP" in combo_focus:
-                pivot_st_phe = pd.crosstab(processed_df[state_col], processed_df['Phenotype'], margins=True, margins_name="Total")
-                st.markdown("**State-Wise CPIC Phenotype Classification Matrix:**")
-                st.dataframe(pivot_st_phe, use_container_width=True)
+            if len(filtered_df['Diplotype'].unique()) > 1:
+                st.markdown(f"**State-Wise Diplotype Cross-Tabulation Matrix for `{filter_description}`:**")
+                pivot_s = pd.crosstab(filtered_df[state_col], filtered_df['Diplotype'], margins=True, margins_name="Total")
+                if is_sci:
+                    pivot_s = pivot_s.rename(columns=lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
+                st.dataframe(pivot_s, use_container_width=True)
 
-    # -------------------------------------------------------------------------
-    # CASE 3: COMPLETE OVERVIEW FOR CURRENT COHORT SLICE
-    # -------------------------------------------------------------------------
+    # VIEW C: OVERALL COHORT
     else:
-        scope_title = f"{sel_drilldown}" if sel_drilldown != "ALL" else "Overall Population"
-        st.markdown(f"#### 🧩 Combination Distribution & Analysis ({scope_title}, N={len(target_df):,})")
-
-        snp_cols = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in target_df.columns]
+        st.markdown(f"#### 🌐 Overall Cohort Distribution for `{filter_description}`")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Genotype Filter", filter_description)
+        k2.metric("Matching Samples (N)", f"{n_filt:,}")
+        k3.metric("Cohort Percentage", f"{pct_filt:.1f}%")
         
-        if "Multi-SNP" in combo_focus and snp_cols:
-            group_cols = snp_cols + ['Diplotype', 'Phenotype']
-            group_cols = [c for c in group_cols if c in target_df.columns]
-            combo_summary = target_df.groupby(group_cols, dropna=False).size().reset_index(name='Sample Count (N)')
-            combo_summary = combo_summary.sort_values(by='Sample Count (N)', ascending=False)
-            tot_n = len(target_df)
-            combo_summary['Frequency (%)'] = combo_summary['Sample Count (N)'].apply(lambda x: f"{(x / tot_n * 100):.1f}%" if tot_n > 0 else "0.0%")
-            
-            if is_sci:
-                rename_map = {
-                    'CYP2C19*2': 'rs4244285 (*2)',
-                    'CYP2C19*3': 'rs4986893 (*3)',
-                    'CYP2C19*17': 'rs12248560 (*17)'
-                }
-                combo_summary = combo_summary.rename(columns=rename_map)
-                combo_summary['Scientific Pattern'] = combo_summary.apply(
-                    lambda r: f"rs4244285({r.get('rs4244285 (*2)', '')}) + rs4986893({r.get('rs4986893 (*3)', '')}) + rs12248560({r.get('rs12248560 (*17)', '')})",
-                    axis=1
-                )
-                combo_summary['Diplotype'] = combo_summary['Diplotype'].apply(lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
-                desired_order = ['rs4244285 (*2)', 'rs4986893 (*3)', 'rs12248560 (*17)', 'Scientific Pattern', 'Diplotype', 'Phenotype', 'Sample Count (N)', 'Frequency (%)']
-                cols_present = [c for c in desired_order if c in combo_summary.columns]
-                combo_summary = combo_summary[cols_present]
+        main_dip = filtered_df['Diplotype'].iloc[0] if len(filtered_df['Diplotype'].unique()) == 1 else "Multiple"
+        k4.metric("Assigned Diplotype", SCI_DIPLOTYPE_MAP.get(main_dip, main_dip) if is_sci else main_dip)
 
-            st.dataframe(combo_summary, use_container_width=True, hide_index=True)
+        # Multi-SNP table
+        snp_cols = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in filtered_df.columns]
+        group_cols = snp_cols + ['Diplotype', 'Phenotype']
+        group_cols = [c for c in group_cols if c in filtered_df.columns]
+        combo_summary = filtered_df.groupby(group_cols, dropna=False).size().reset_index(name='Sample Count (N)')
+        combo_summary = combo_summary.sort_values(by='Sample Count (N)', ascending=False)
+        combo_summary['Frequency (%)'] = combo_summary['Sample Count (N)'].apply(lambda x: f"{(x / n_filt * 100):.1f}%" if n_filt > 0 else "0.0%")
 
-            fig_combo = px.bar(
-                combo_summary,
-                x='Sample Count (N)',
-                y='Diplotype',
-                color='Phenotype',
-                orientation='h',
-                title=f"Multi-SNP Diplotype & Phenotype Frequency ({scope_title})",
-                color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8']
+        if is_sci:
+            rename_map = {
+                'CYP2C19*2': 'rs4244285 (*2)',
+                'CYP2C19*3': 'rs4986893 (*3)',
+                'CYP2C19*17': 'rs12248560 (*17)'
+            }
+            combo_summary = combo_summary.rename(columns=rename_map)
+            combo_summary['Scientific Pattern'] = combo_summary.apply(
+                lambda r: f"rs4244285({r.get('rs4244285 (*2)', '')}) + rs4986893({r.get('rs4986893 (*3)', '')}) + rs12248560({r.get('rs12248560 (*17)', '')})",
+                axis=1
             )
-            fig_combo.update_layout(height=320, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_combo, use_container_width=True)
+            combo_summary['Diplotype'] = combo_summary['Diplotype'].apply(lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
+            desired_order = ['rs4244285 (*2)', 'rs4986893 (*3)', 'rs12248560 (*17)', 'Scientific Pattern', 'Diplotype', 'Phenotype', 'Sample Count (N)', 'Frequency (%)']
+            cols_present = [c for c in desired_order if c in combo_summary.columns]
+            combo_summary = combo_summary[cols_present]
 
-        elif "Star-Diplotypes" in combo_focus and 'Diplotype' in target_df.columns:
-            dip_summary = target_df['Diplotype'].value_counts().reset_index()
-            dip_summary.columns = ['Diplotype', 'Count (N)']
-            if is_sci:
-                dip_summary['Diplotype'] = dip_summary['Diplotype'].apply(lambda c: SCI_DIPLOTYPE_MAP.get(c, c))
-            tot_n = len(target_df)
-            dip_summary['Frequency (%)'] = dip_summary['Count (N)'].apply(lambda x: f"{(x / tot_n * 100):.1f}%" if tot_n > 0 else "0.0%")
-            st.dataframe(dip_summary, use_container_width=True, hide_index=True)
+        st.dataframe(combo_summary, use_container_width=True, hide_index=True)
 
-            fig_d = px.bar(
-                dip_summary, x='Count (N)', y='Diplotype', orientation='h',
-                title=f"Diplotype Frequencies ({scope_title})",
-                color_discrete_sequence=['#166534']
-            )
-            fig_d.update_layout(height=300, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_d, use_container_width=True)
-
-        elif "CPIC Phenotypes" in combo_focus and 'Phenotype' in target_df.columns:
-            phe_summary = target_df['Phenotype'].value_counts().reset_index()
-            phe_summary.columns = ['CPIC Phenotype', 'Count (N)']
-            tot_n = len(target_df)
-            phe_summary['Percentage (%)'] = phe_summary['Count (N)'].apply(lambda x: f"{(x / tot_n * 100):.1f}%" if tot_n > 0 else "0.0%")
-            st.dataframe(phe_summary, use_container_width=True, hide_index=True)
-
-            fig_p = px.pie(
-                phe_summary, names='CPIC Phenotype', values='Count (N)',
-                hole=0.45, title=f"CPIC Phenotype Breakdown ({scope_title})",
-                color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8']
-            )
-            fig_p.update_layout(height=300, margin=dict(l=20, r=20, t=35, b=20))
-            st.plotly_chart(fig_p, use_container_width=True)
+        fig_combo = px.bar(
+            combo_summary,
+            x='Sample Count (N)',
+            y='Diplotype',
+            color='Phenotype',
+            orientation='h',
+            title=f"Multi-SNP Frequency ({filter_description})",
+            color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8']
+        )
+        fig_combo.update_layout(height=300, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig_combo, use_container_width=True)
 
 # -----------------------------------------------------------------------------
 # REUSABLE UNIFIED RESULTS RENDERER (MATCHING SCREENSHOTS 1, 2, 3, 4)
