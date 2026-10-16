@@ -548,6 +548,13 @@ def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
             p_clean = p.lower().replace(" ", "").replace("_", "").replace("-", "")
             if p_clean in c_clean:
                 return c
+                
+    # Generic fallback: match target_key directly in column names
+    tk_clean = str(target_key).lower().replace(" ", "").replace("_", "").replace("-", "")
+    for c in cols:
+        c_clean = str(c).lower().replace(" ", "").replace("_", "").replace("-", "")
+        if tk_clean == c_clean or tk_clean in c_clean or c_clean in tk_clean:
+            return c
     return None
 
 def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -2738,6 +2745,121 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             if cat_gene not in detected_gene_matches:
                                 detected_gene_matches.append(cat_gene)
 
+                # Define helper functions and callbacks for flexible marker mapping
+                def extract_alleles_from_calls(calls):
+                    al_counts = Counter()
+                    for call in calls:
+                        clean_c = str(call).replace('/', '').replace('|', '').replace(' ', '').upper()
+                        for ch in clean_c:
+                            if ch.isalpha():
+                                al_counts[ch] += 1
+                    most = [al for al, _ in al_counts.most_common()]
+                    r = most[0] if len(most) > 0 else 'A'
+                    v = most[1] if len(most) > 1 else 'None'
+                    return r, v
+
+                def find_default(patterns, cols):
+                    for pattern in patterns:
+                        for c in cols:
+                            if str(pattern).strip().lower() == str(c).strip().lower():
+                                return c
+                    for pattern in patterns:
+                        p_norm = str(pattern).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
+                        if not p_norm: continue
+                        for c in cols:
+                            c_norm = str(c).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
+                            if p_norm == c_norm or p_norm in c_norm or c_norm in p_norm:
+                                return c
+                    for pattern in patterns:
+                        for c in cols:
+                            if str(pattern).lower() in str(c).lower():
+                                return c
+                    return cols[0] if cols else ""
+
+                def find_best_column_match(marker_label: str, std_name: str, sel_gene: str, cols: list) -> str:
+                    if not cols:
+                        return ""
+                    # 1. Exact match with label, name, or gene_marker
+                    for target in [marker_label, std_name, f"{sel_gene}_{std_name}", f"{sel_gene} {std_name}", f"{sel_gene}_{marker_label}"]:
+                        for c in cols:
+                            if str(target).strip().lower() == str(c).strip().lower():
+                                return c
+
+                    # 2. Extract rsID if present in marker_label or std_name
+                    import re
+                    rs_match = re.search(r'rs\d+', f"{marker_label} {std_name}".lower())
+                    if rs_match:
+                        rs_id = rs_match.group(0)
+                        for c in cols:
+                            if rs_id in str(c).lower():
+                                return c
+
+                    # 3. Check for gene + star allele e.g. CYP2C9 and *2
+                    star_match = re.search(r'\*\d+[a-zA-Z]?', f"{marker_label} {std_name}")
+                    if star_match:
+                        star_str = star_match.group(0).lower()
+                        for c in cols:
+                            c_low = str(c).lower()
+                            if sel_gene.lower() in c_low and star_str in c_low:
+                                return c
+                        for c in cols:
+                            if star_str in str(c).lower():
+                                return c
+
+                    # 4. Fallback to find_default
+                    return find_default([marker_label, std_name], cols)
+
+                def get_marker_defaults(marker_label: str, sel_gene: str, detected_calls: list = None):
+                    """
+                    Intelligently determines defaults for a marker WITHOUT rigid hardcoding.
+                    Prioritizes actual data detected in the column over static presets.
+                    """
+                    clean_label = str(marker_label).strip()
+                    if ' ' in clean_label and '(' in clean_label:
+                        base_name = clean_label.split(' ')[0]
+                    else:
+                        base_name = clean_label
+
+                    # Priority 1: If detected calls exist in data, directly derive defaults from observed data!
+                    if detected_calls and len(detected_calls) > 0:
+                        auto_r, auto_v = extract_alleles_from_calls(detected_calls)
+                        def_p = ", ".join(detected_calls)
+                        badge_s = f"Observed: {def_p}"
+                        badge_d = f"Auto-configured from dataset: <b>{def_p}</b> | Inferred Ref: <b>{auto_r}</b>, Var: <b>{auto_v}</b>"
+                        return base_name, auto_r, auto_v, def_p, badge_s, badge_d
+
+                    # Priority 2: Standard PGx Catalog presets as initial suggestions
+                    norm_lbl = clean_label.lower().replace(" ", "").replace("_", "").replace("-", "")
+                    norm_gene = sel_gene.upper().strip()
+
+                    if norm_gene == 'CYP2C19':
+                        if "*2" in norm_lbl or "rs4244285" in norm_lbl:
+                            return 'CYP2C19*2', 'G', 'A', 'GA, GG, AA', "Default: GA, GG, AA", "Standard calls: <b>GA</b> (Het), <b>GG</b> (Wild-type), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
+                        elif "*3" in norm_lbl or "rs4986893" in norm_lbl:
+                            return 'CYP2C19*3', 'G', 'None', 'GG', "Default: GG", "Standard call: <b>GG</b> (Wild-Type) | Ref: <b>G</b>, Var: <b>None</b> (or A if variant present)"
+                        elif "*17" in norm_lbl or "rs12248560" in norm_lbl:
+                            return 'CYP2C19*17', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                    elif norm_gene == 'CYP2C9':
+                        if "*2" in norm_lbl or "rs1799853" in norm_lbl:
+                            return 'CYP2C9*2', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                        elif "*3" in norm_lbl or "rs1057910" in norm_lbl:
+                            return 'CYP2C9*3', 'A', 'C', 'AA, AC, CC', "Default: AA, AC, CC", "Standard calls: <b>AA</b> (Wild-type), <b>AC</b> (Het), <b>CC</b> (Hom Var) | Ref: <b>A</b>, Var: <b>C</b>"
+                    elif norm_gene == 'VKORC1':
+                        if "1639" in norm_lbl or "rs9923231" in norm_lbl or "*2" in norm_lbl:
+                            return 'VKORC1-1639G>A', 'G', 'A', 'GG, GA, AA', "Default: GG, GA, AA", "Standard calls: <b>GG</b> (Wild-type), <b>GA</b> (Het), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
+                    elif norm_gene == 'CYP2D6':
+                        if "*4" in norm_lbl or "rs3892097" in norm_lbl:
+                            return 'CYP2D6*4', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                        elif "*10" in norm_lbl or "rs1065852" in norm_lbl:
+                            return 'CYP2D6*10', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                    elif norm_gene == 'DPYD':
+                        if "*2a" in norm_lbl or "rs3918290" in norm_lbl:
+                            return 'DPYD*2A', 'G', 'A', 'GG, GA, AA', "Default: GG, GA, AA", "Standard calls: <b>GG</b> (Wild-type), <b>GA</b> (Het), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
+                        elif "*13" in norm_lbl or "rs55886062" in norm_lbl:
+                            return 'DPYD*13', 'C', 'G', 'CC, CG, GG', "Default: CC, CG, GG", "Standard calls: <b>CC</b> (Wild-type), <b>CG</b> (Het), <b>GG</b> (Hom Var) | Ref: <b>C</b>, Var: <b>G</b>"
+
+                    return base_name, 'A', 'G', 'AA, AG, GG', "Custom Target", f"Configurable mapping and rules for <b>{marker_label}</b>"
+
                 # Define callbacks to update widget session state safely before widgets instantiate
                 def cb_switch_target_gene(new_g, new_markers):
                     st.session_state['selected_gene'] = new_g
@@ -2745,6 +2867,32 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     for k in list(st.session_state.keys()):
                         if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
                             del st.session_state[k]
+
+                def cb_remove_marker_card(idx_to_remove):
+                    cur_markers = list(st.session_state.get('selected_markers', []))
+                    if 0 <= idx_to_remove < len(cur_markers):
+                        cur_markers.pop(idx_to_remove)
+                        st.session_state['selected_markers'] = cur_markers
+                        prefixes = ['w_map_name_', 'w_map_col_', 'w_map_ref_', 'w_map_var_', 'w_map_perm_', 'sel_ref_choice_', 'sel_var_choice_', 'custom_ref_in_', 'custom_var_in_']
+                        for i in range(idx_to_remove, len(cur_markers) + 1):
+                            for prefix in prefixes:
+                                cur_k = f"{prefix}{i}"
+                                next_k = f"{prefix}{i+1}"
+                                if next_k in st.session_state:
+                                    st.session_state[cur_k] = st.session_state[next_k]
+                                    del st.session_state[next_k]
+                                elif cur_k in st.session_state:
+                                    del st.session_state[cur_k]
+
+                def cb_add_new_marker_card(gene_prefix):
+                    cur_markers = list(st.session_state.get('selected_markers', []))
+                    new_num = len(cur_markers) + 1
+                    new_marker_lbl = f"{gene_prefix}_Marker_{new_num}"
+                    while new_marker_lbl in cur_markers:
+                        new_num += 1
+                        new_marker_lbl = f"{gene_prefix}_Marker_{new_num}"
+                    cur_markers.append(new_marker_lbl)
+                    st.session_state['selected_markers'] = cur_markers
 
                 def cb_set_preset(p_k, p_val, r_k, v_k, r_val, v_val, sel_r_k, sel_v_k):
                     st.session_state[p_k] = p_val
@@ -2868,36 +3016,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         key="step3_mapping_view_mode"
                     )
 
-                def find_default(patterns, cols):
-                    for pattern in patterns:
-                        for c in cols:
-                            if str(pattern).strip().lower() == str(c).strip().lower():
-                                return c
-                    for pattern in patterns:
-                        p_norm = str(pattern).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
-                        if not p_norm: continue
-                        for c in cols:
-                            c_norm = str(c).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
-                            if p_norm == c_norm or p_norm in c_norm or c_norm in p_norm:
-                                return c
-                    for pattern in patterns:
-                        for c in cols:
-                            if str(pattern).lower() in str(c).lower():
-                                return c
-                    return cols[0] if cols else ""
-
-                def extract_alleles_from_calls(calls):
-                    al_counts = Counter()
-                    for call in calls:
-                        clean_c = str(call).replace('/', '').replace('|', '').replace(' ', '').upper()
-                        for ch in clean_c:
-                            if ch.isalpha():
-                                al_counts[ch] += 1
-                    most = [al for al, _ in al_counts.most_common()]
-                    r = most[0] if len(most) > 0 else 'A'
-                    v = most[1] if len(most) > 1 else 'None'
-                    return r, v
-
                 mapped_marker_dict = {}
                 mapping_has_errors = False
                 extra_rows = st.session_state.get('extra_mapping_rows', [])
@@ -2910,47 +3028,17 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     st.caption("Map spreadsheet columns and configure any combination of permitted genotypes (e.g. GA, GG, AG or CC, CT, TT). Check live data breakdown and verify cohort calls instantly.")
 
                     for idx, marker_label in enumerate(sel_map_markers):
-                        # Determine standard names, alleles, and default permitted genotypes
-                        if "*2" in marker_label or "rs4244285" in marker_label:
-                            std_name = 'CYP2C19*2'
-                            def_ref = 'G'
-                            def_var = 'A'
-                            def_permitted = 'GA, GG, AA'
-                            badge_short = "Expected: GA, GG, AA"
-                            badge_detail = "Standard calls: <b>GA</b> (Het), <b>GG</b> (Wild-type), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
-                            matching_cols = [c for c in col_options if '*2' in str(c) or 'rs4244285' in str(c).lower() or 'c.681' in str(c).lower()]
-                        elif "*3" in marker_label or "rs4986893" in marker_label:
-                            std_name = 'CYP2C19*3'
-                            def_ref = 'G'
-                            def_var = 'None'
-                            def_permitted = 'GG'
-                            badge_short = "Expected: GG"
-                            badge_detail = "Standard call: <b>GG</b> (Wild-Type, MAF=0.0) | Ref: <b>G</b>, Var: <b>None</b> (or A if variant present)"
-                            matching_cols = [c for c in col_options if '*3' in str(c) or 'rs4986893' in str(c).lower() or 'c.636' in str(c).lower()]
-                        elif "*17" in marker_label or "rs12248560" in marker_label:
-                            std_name = 'CYP2C19*17'
-                            def_ref = 'C'
-                            def_var = 'T'
-                            def_permitted = 'CC, CT, TT'
-                            badge_short = "Expected: CC, CT, TT"
-                            badge_detail = "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
-                            matching_cols = [c for c in col_options if '*17' in str(c) or 'rs12248560' in str(c).lower() or 'c.-806' in str(c).lower()]
-                        else:
-                            std_name = marker_label.split(' ')[0]
-                            def_ref = 'A'
-                            def_var = 'G'
-                            def_permitted = f"{def_ref}{def_ref}, {def_ref}{def_var}, {def_var}{def_var}"
-                            badge_short = "Custom Target"
-                            badge_detail = f"Map spreadsheet column and allele rules for <b>{marker_label}</b>"
-                            matching_cols = [c for c in col_options if std_name.lower() in str(c).lower()]
-
-                        best_match = matching_cols[0] if matching_cols else find_default([marker_label, std_name], col_options)
-
                         col_key = f"w_map_col_{idx}"
+                        name_key = f"w_map_name_{idx}"
+                        ref_key = f"w_map_ref_{idx}"
+                        var_key = f"w_map_var_{idx}"
+                        perm_key = f"w_map_perm_{idx}"
+
+                        # Determine best matching column
+                        best_match = find_best_column_match(marker_label, marker_label.split(' ')[0], sel_map_gene, col_options)
                         if col_key not in st.session_state or st.session_state[col_key] not in col_options:
                             st.session_state[col_key] = best_match if (best_match and best_match in col_options) else col_options[0]
 
-                        def_col_idx = col_options.index(st.session_state[col_key]) if st.session_state[col_key] in col_options else 0
                         sel_col = st.session_state[col_key]
 
                         # Live Data Inspection for this column
@@ -2963,20 +3051,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
                             observed_counts = dict(norm_calls.value_counts())
                             detected_calls_list = list(observed_counts.keys())
+                        tot_samples_col = len(norm_calls)
 
-                        ref_key = f"w_map_ref_{idx}"
-                        var_key = f"w_map_var_{idx}"
-                        perm_key = f"w_map_perm_{idx}"
+                        # Determine defaults prioritizing detected calls in the data
+                        std_name, def_ref, def_var, def_permitted, badge_short, badge_detail = get_marker_defaults(marker_label, sel_map_gene, detected_calls_list)
 
-                        # SMART AUTO-DEFAULT: If detected calls have zero overlap with default permitted genotypes,
-                        # automatically adapt def_permitted, def_ref, def_var to the detected calls
-                        def_perm_tokens = [x.strip().upper() for x in def_permitted.split(',') if x.strip()]
-                        if detected_calls_list and not any(c in def_perm_tokens for c in detected_calls_list):
-                            def_permitted = ", ".join(detected_calls_list)
-                            auto_r, auto_v = extract_alleles_from_calls(detected_calls_list)
-                            if auto_r: def_ref = auto_r
-                            if auto_v: def_var = auto_v
-
+                        # Initialize session state for this card
+                        if name_key not in st.session_state:
+                            st.session_state[name_key] = std_name
                         if ref_key not in st.session_state:
                             st.session_state[ref_key] = def_ref
                         if var_key not in st.session_state:
@@ -2984,10 +3066,20 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if perm_key not in st.session_state:
                             st.session_state[perm_key] = def_permitted
 
+                        # SMART AUTO-ADAPT: If detected calls have zero overlap with current permitted genotypes,
+                        # automatically adapt to detected calls
+                        cur_perm_tokens = [x.strip().upper() for x in str(st.session_state.get(perm_key, '')).split(',') if x.strip()]
+                        if detected_calls_list and not any(c in cur_perm_tokens for c in detected_calls_list):
+                            st.session_state[perm_key] = ", ".join(detected_calls_list)
+                            auto_r, auto_v = extract_alleles_from_calls(detected_calls_list)
+                            if auto_r: st.session_state[ref_key] = auto_r
+                            if auto_v: st.session_state[var_key] = auto_v
+
+                        cur_marker_name = st.session_state.get(name_key, std_name)
                         st.markdown(f"""
-                        <div class="clean-card-box" style="margin-bottom: 10px; border-left: 4px solid #3B82F6;">
+                        <div class="clean-card-box" style="margin-bottom: 8px; border-left: 4px solid #3B82F6;">
                             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                                <h5 style="margin:0; color:#0F172A; font-weight:700;">🧬 {marker_label}</h5>
+                                <h5 style="margin:0; color:#0F172A; font-weight:700;">🧬 Marker #{idx+1}: {cur_marker_name}</h5>
                                 <span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #BFDBFE;">{badge_short}</span>
                             </div>
                             <div style="margin-top: 6px; font-size: 0.85rem; color: #475569;">
@@ -2996,14 +3088,24 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         </div>
                         """, unsafe_allow_html=True)
 
-                        c_col1, c_col2 = st.columns([1.5, 1.5])
-                        with c_col1:
+                        c_top1, c_top2, c_top3 = st.columns([1.1, 1.5, 0.4])
+                        with c_top1:
+                            user_marker_name = st.text_input(
+                                "Biomarker Name:",
+                                value=st.session_state.get(name_key, std_name),
+                                key=name_key,
+                                help="Edit marker name (e.g. CYP2C9*2, CYP2C19*2, rs1799853)"
+                            ).strip()
+                            if not user_marker_name:
+                                user_marker_name = std_name
+                        with c_top2:
+                            def_col_idx = col_options.index(st.session_state[col_key]) if st.session_state[col_key] in col_options else 0
                             new_sel_col = st.selectbox(
-                                "Genotype column from spreadsheet:",
+                                "Spreadsheet Column:",
                                 col_options,
                                 index=def_col_idx,
                                 key=col_key,
-                                help=f"Spreadsheet column for {marker_label}"
+                                help=f"Spreadsheet column for {user_marker_name}"
                             )
                             if new_sel_col != sel_col:
                                 sel_col = new_sel_col
@@ -3013,18 +3115,23 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                     norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
                                     observed_counts = dict(norm_calls.value_counts())
                                     detected_calls_list = list(observed_counts.keys())
+                                    tot_samples_col = len(norm_calls)
+                        with c_top3:
+                            st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                            st.button("🗑️ Remove", key=f"btn_remove_marker_{idx}", on_click=cb_remove_marker_card, args=(idx,), help=f"Remove marker from mapping")
 
-                        with c_col2:
-                            if detected_calls_list:
-                                st.markdown("<div style='font-size: 11px; font-weight: 700; color: #64748B; margin-bottom: 4px; text-transform: uppercase;'>Detected Calls in Dataset:</div>", unsafe_allow_html=True)
+                        if detected_calls_list:
+                            c_det_a, c_det_b = st.columns([1.8, 1.2])
+                            with c_det_a:
                                 pill_html = " ".join([f"<span style='background:#F1F5F9; color:#0F172A; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #CBD5E1;'>{c} ({observed_counts[c]})</span>" for c in detected_calls_list])
-                                st.markdown(pill_html, unsafe_allow_html=True)
+                                st.markdown(f"<div style='font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;'>Detected Calls in `{sel_col}` ({tot_samples_col:,} samples):</div><div style='margin-top:2px;'>{pill_html}</div>", unsafe_allow_html=True)
+                            with c_det_b:
                                 st.button(
-                                    f"⚡ Auto-Map Detected Calls ({', '.join(detected_calls_list)})",
+                                    f"⚡ Auto-Map All Detected Calls ({', '.join(detected_calls_list)})",
                                     key=f"btn_automap_detected_{idx}",
                                     on_click=cb_automap_detected,
                                     args=(perm_key, detected_calls_list, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"),
-                                    help="Click to set permitted genotypes and auto-align Reference/Variant alleles"
+                                    help="Adopt all detected calls as permitted combinations and align alleles automatically"
                                 )
 
                         c2_m, c3_m = st.columns(2)
@@ -3098,60 +3205,102 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             if len(g) == 2:
                                 expanded_set.add(g[1] + g[0])
 
-                        # LIVE DATA CHECK & SHOW BREAKDOWN
-                        if sel_col in df_raw.columns and observed_counts:
-                            tot_samples_col = len(norm_calls)
-                            unexpected = [k for k in observed_counts.keys() if k not in expanded_set]
+                        # LIVE DATA CHECK & FLAGGING SYSTEM
+                        unexpected_calls = [k for k in observed_counts.keys() if k not in expanded_set] if observed_counts else []
+                        tot_unmapped_cnt = sum(observed_counts[u] for u in unexpected_calls) if unexpected_calls else 0
+                        unmapped_pct = (tot_unmapped_cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
 
-                            check_rows = []
-                            for call, cnt in sorted(observed_counts.items(), key=lambda x: x[1], reverse=True):
-                                pct = (cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
-                                is_covered = call in expanded_set
-                                check_rows.append({
-                                    'Observed Genotype': call,
-                                    'Sample Count': cnt,
-                                    'Cohort %': f"{pct:.1f}%",
-                                    'Mapping Status': "✅ Permitted" if is_covered else "⚠️ Unmapped"
-                                })
+                        cand_r, cand_v = extract_alleles_from_calls(raw_perm_list)
+                        perm_chars = {ch for g in raw_perm_list for ch in g if ch.isalpha()}
+                        ref_mismatch = bool(ref_val and ref_val not in perm_chars)
+                        var_mismatch = bool(var_val and var_val != 'None' and var_val not in perm_chars)
 
-                            st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-                            c_chk1, c_chk2 = st.columns([1.5, 1.5])
-                            with c_chk1:
-                                st.markdown(f"**Data Check for `{sel_col}` ({tot_samples_col:,} valid samples):**")
+                        identical_alleles = bool(ref_val == var_val and ref_val != '' and var_val != 'None')
+                        if identical_alleles:
+                            mapping_has_errors = True
+
+                        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                        c_flg1, c_flg2 = st.columns([1.5, 1.5])
+                        with c_flg1:
+                            st.markdown(f"**Data Audit for `{sel_col}` ({tot_samples_col:,} valid samples):**")
+                            if observed_counts:
+                                check_rows = []
+                                for call, cnt in sorted(observed_counts.items(), key=lambda x: x[1], reverse=True):
+                                    pct = (cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
+                                    is_covered = call in expanded_set
+                                    check_rows.append({
+                                        'Observed Genotype': call,
+                                        'Sample Count': cnt,
+                                        'Cohort %': f"{pct:.1f}%",
+                                        'Mapping Status': "✅ Permitted" if is_covered else "🚨 Flagged: Unmapped"
+                                    })
                                 st.dataframe(pd.DataFrame(check_rows), use_container_width=True, hide_index=True)
+                            else:
+                                st.info(f"ℹ️ No valid genotype calls found in column `{sel_col}`.")
 
-                            with c_chk2:
-                                if unexpected:
-                                    st.warning(f"⚠️ Detected unmapped calls: `{unexpected}` ({sum(observed_counts[u] for u in unexpected)} sample(s)) not in your Permitted Genotypes (`{', '.join(raw_perm_list)}`).")
-                                    unexp_str = ", ".join(unexpected)
-                                    st.button(
-                                        f"➕ Add `{unexp_str}` to Permitted Genotypes",
-                                        key=f"btn_add_unexp_{idx}",
-                                        on_click=cb_add_unmapped,
-                                        args=(perm_key, unexpected, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
-                                    )
-                                else:
-                                    st.success(f"✅ **All {tot_samples_col:,} samples verified!** Observed calls match permitted combinations (`{', '.join(raw_perm_list)}`).")
+                        with c_flg2:
+                            # Flag 1: Unmapped Calls
+                            if unexpected_calls:
+                                st.markdown(f"""
+                                <div style="background: #FEF2F2; border: 1.5px solid #F87171; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                                    <div style="font-weight: 700; color: #991B1B; font-size: 13px;">🚨 FLAG: Unmapped Calls in Dataset</div>
+                                    <div style="color: #7F1D1D; font-size: 12px; margin-top: 3px;">
+                                        Calls <code>{unexpected_calls}</code> ({tot_unmapped_cnt:,} sample(s), {unmapped_pct:.1f}%) not in Permitted Genotypes (<code>{perm_val}</code>).
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                unexp_str = ", ".join(unexpected_calls)
+                                st.button(
+                                    f"➕ Allow Flagged Calls ({unexp_str}) into Permitted Genotypes",
+                                    key=f"btn_add_unexp_{idx}",
+                                    on_click=cb_add_unmapped,
+                                    args=(perm_key, unexpected_calls, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                )
+                            elif tot_samples_col > 0:
+                                st.markdown(f"""
+                                <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                                    <div style="font-weight: 700; color: #166534; font-size: 13px;">✅ 100% Verified: All {tot_samples_col:,} Samples Permitted</div>
+                                    <div style="color: #14532D; font-size: 12px; margin-top: 3px;">
+                                        All observed calls in <code>{sel_col}</code> match your permitted genotype rules (<code>{', '.join(raw_perm_list)}</code>).
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
 
-                                # Check if Ref and Var alleles match genotypes
-                                gt_ref_cand, gt_var_cand = extract_alleles_from_calls(raw_perm_list)
-                                if (ref_val != gt_ref_cand or (var_val != gt_var_cand and gt_var_cand != 'None')) and gt_ref_cand:
-                                    st.info(f"💡 Genotypes suggest Ref = **{gt_ref_cand}**, Var = **{gt_var_cand}**.")
-                                    st.button(
-                                        f"👉 Align Alleles to Ref: {gt_ref_cand}, Var: {gt_var_cand}",
-                                        key=f"btn_align_alleles_{idx}",
-                                        on_click=cb_align_alleles,
-                                        args=(ref_key, var_key, gt_ref_cand, gt_var_cand, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
-                                    )
+                            # Flag 2: Allele Mismatch
+                            if (ref_mismatch or var_mismatch) and cand_r:
+                                st.markdown(f"""
+                                <div style="background: #FFFBEB; border: 1.5px solid #FCD34D; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                                    <div style="font-weight: 700; color: #92400E; font-size: 13px;">⚠️ FLAG: Allele Rule Inconsistency</div>
+                                    <div style="color: #78350F; font-size: 12px; margin-top: 3px;">
+                                        Configured Ref (<b>{ref_val}</b>) or Var (<b>{var_val}</b>) allele is absent from permitted genotypes. Expected alleles: Ref = <b>{cand_r}</b>, Var = <b>{cand_v}</b>.
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.button(
+                                    f"👉 Align Alleles to Ref: {cand_r}, Var: {cand_v}",
+                                    key=f"btn_align_alleles_{idx}",
+                                    on_click=cb_align_alleles,
+                                    args=(ref_key, var_key, cand_r, cand_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                )
+
+                            # Flag 3: Identical Alleles
+                            if identical_alleles:
+                                st.error(f"⛔ FLAG: Reference allele ({ref_val}) and Variant allele ({var_val}) cannot be identical!")
 
                         v_al_stored = 'A' if var_val == 'None' else var_val.strip().upper()
                         mapped_marker_dict[sel_col] = {
-                            'std_name': std_name,
+                            'std_name': user_marker_name,
                             'ref_allele': ref_val.strip().upper(),
                             'var_allele': v_al_stored,
-                            'marker_label': marker_label,
+                            'marker_label': user_marker_name,
                             'permitted_genotypes': raw_perm_list
                         }
+
+                    # Button to add new marker card row
+                    st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+                    c_add_card, _ = st.columns([0.4, 0.6])
+                    with c_add_card:
+                        st.button("➕ Add Marker Mapping Row", key="btn_add_marker_card_row", on_click=cb_add_new_marker_card, args=(sel_map_gene,))
 
                     # Render Extra Custom Mapping Rows
                     if extra_rows:
@@ -3237,13 +3386,13 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                         'Observed Genotype': call,
                                         'Sample Count': cnt,
                                         'Cohort %': f"{pct:.1f}%",
-                                        'Mapping Status': "✅ Permitted" if call in exp_c else "⚠️ Unmapped"
+                                        'Mapping Status': "✅ Permitted" if call in exp_c else "🚨 Flagged: Unmapped"
                                     })
                                 st.markdown(f"**Data Check for `{c_col}` ({len(ex_norm):,} valid samples):**")
                                 st.dataframe(pd.DataFrame(ex_chk_rows), use_container_width=True, hide_index=True)
 
                                 if c_unexp:
-                                    st.warning(f"⚠️ Detected unmapped calls: `{c_unexp}`.")
+                                    st.warning(f"🚨 Detected unmapped calls: `{c_unexp}`.")
                                     st.button(
                                         f"➕ Add `{', '.join(c_unexp)}` to Permitted List",
                                         key=f"btn_add_unexp_ex_{r_id}",
@@ -3291,22 +3440,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                     editor_data = []
                     for m_idx, marker_label in enumerate(sel_map_markers):
-                        if "*2" in marker_label:
-                            s_name, d_ref, d_var, d_perm = 'CYP2C19*2', 'G', 'A', 'GA, GG, AA'
-                        elif "*3" in marker_label:
-                            s_name, d_ref, d_var, d_perm = 'CYP2C19*3', 'G', 'None', 'GG'
-                        elif "*17" in marker_label:
-                            s_name, d_ref, d_var, d_perm = 'CYP2C19*17', 'C', 'T', 'CC, CT, TT'
-                        else:
-                            s_name = marker_label.split(' ')[0]
-                            d_ref, d_var, d_perm = 'A', 'G', 'AA, AG, GG'
-
-                        cur_c = st.session_state.get(f"w_map_col_{m_idx}", find_default([marker_label, s_name], col_options))
+                        s_name, d_ref, d_var, d_perm, _, _ = get_marker_defaults(marker_label, sel_map_gene)
+                        cur_c = st.session_state.get(f"w_map_col_{m_idx}", find_best_column_match(marker_label, s_name, sel_map_gene, col_options))
                         cur_r = st.session_state.get(f"w_map_ref_{m_idx}", d_ref)
                         cur_v = st.session_state.get(f"w_map_var_{m_idx}", d_var)
                         cur_p = st.session_state.get(f"w_map_perm_{m_idx}", d_perm)
+                        cur_n = st.session_state.get(f"w_map_name_{m_idx}", s_name)
                         editor_data.append({
-                            'Marker Name': s_name,
+                            'Marker Name': cur_n,
                             'Spreadsheet Column': cur_c if cur_c in col_options else col_options[0],
                             'Reference Allele': cur_r,
                             'Variant Allele': cur_v,
@@ -3350,14 +3491,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 m_var = str(row_val.get('Variant Allele', 'G')).strip().upper()
                                 m_perm = str(row_val.get('Permitted Genotypes', '')).strip().upper()
 
-                                # Auto-align alleles if defaulted
-                                p_list_tmp = [g.strip().upper() for g in m_perm.split(',') if g.strip()]
-                                r_cand_t, v_cand_t = extract_alleles_from_calls(p_list_tmp)
-                                if m_ref in ['G', 'A'] and r_cand_t and r_cand_t != m_ref and m_name not in ['CYP2C19*2', 'CYP2C19*3']:
-                                    m_ref = r_cand_t
-                                    m_var = v_cand_t
-
                                 if t_idx < len(sel_map_markers):
+                                    st.session_state[f"w_map_name_{t_idx}"] = m_name
                                     st.session_state[f"w_map_col_{t_idx}"] = m_col
                                     st.session_state[f"w_map_ref_{t_idx}"] = m_ref
                                     st.session_state[f"w_map_var_{t_idx}"] = m_var
@@ -3415,9 +3550,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                     pm_set.add(g[1] + g[0])
 
                             unexp = [k for k in c_cnts.keys() if k not in pm_set]
+                            unexp_cnt = sum(c_cnts[k] for k in unexp)
                             dist_str = ", ".join([f"{k} ({v})" for k, v in sorted(c_cnts.items())])
 
-                            status_str = f"✅ Verified ({tot_c:,} samples)" if not unexp else f"⚠️ Unmapped: {unexp}"
+                            status_str = f"✅ Verified ({tot_c:,} samples)" if not unexp else f"🚨 Flagged: {len(unexp)} Unmapped ({unexp_cnt} samples)"
                             batch_check_rows.append({
                                 'Marker': m_nm,
                                 'Column': m_cl,
@@ -3442,9 +3578,25 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 for col_name, m_info in mapped_marker_dict.items():
                     r_al = m_info.get('ref_allele', '')
                     v_al = m_info.get('var_allele', '')
-                    if r_al and v_al and r_al == v_al:
+                    if r_al and v_al and r_al == v_al and v_al != 'None':
                         st.error(f"⛔ For marker **{m_info.get('marker_label', col_name)}**, Reference allele ({r_al}) and Variant allele ({v_al}) cannot be identical.")
                         mapping_has_errors = True
+
+                # Check for unmapped calls across all mapped columns to display summary advisory
+                total_unmapped_samples = 0
+                for col_name, m_info in mapped_marker_dict.items():
+                    if col_name in df_raw.columns:
+                        p_list = m_info.get('permitted_genotypes', [])
+                        p_set = {g.replace('/', '').replace('|', '').replace(' ', '') for g in p_list if g.strip()}
+                        for g in list(p_set):
+                            if len(g) == 2: p_set.add(g[1] + g[0])
+                        r_s = df_raw[col_name].dropna().astype(str).str.strip().str.upper()
+                        v_s = r_s[~r_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])].map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
+                        unm_cnt = sum(cnt for call, cnt in v_s.value_counts().items() if call not in p_set)
+                        total_unmapped_samples += unm_cnt
+
+                if total_unmapped_samples > 0:
+                    st.warning(f"⚠️ **Advisory:** Detected {total_unmapped_samples:,} sample call(s) across your dataset that are not permitted by your genotype rules. Any unpermitted calls will be flagged during QC audit and treated as missing.")
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 c_b1, c_b2, c_b3 = st.columns([0.25, 0.5, 0.25])
