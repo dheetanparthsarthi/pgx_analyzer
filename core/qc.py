@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class DataQCEngine:
-    def __init__(self, df: pd.DataFrame, existing_sample_ids: Set[str] = None, custom_col_mapping: Dict[str, str] = None, custom_snp_rules: Dict[str, Dict] = None):
+    def __init__(self, df: pd.DataFrame, existing_sample_ids: Set[str] = None, custom_col_mapping: Dict[str, str] = None, custom_snp_rules: Dict[str, Dict] = None, *args, **kwargs):
         """
         Initialize QC Engine with a raw DataFrame.
         """

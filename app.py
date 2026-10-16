@@ -25,6 +25,12 @@ import io
 from collections import Counter
 from scipy import stats
 
+import importlib
+import core.qc
+try:
+    importlib.reload(core.qc)
+except Exception:
+    pass
 from core.qc import DataQCEngine
 from core.stratification import DemographicStratifier
 from core.stats import GeneticStatsEngine
@@ -648,7 +654,20 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tupl
         }
         return clean_df, qc_report, full_results
 
-    qc_engine = DataQCEngine(df, custom_col_mapping=mapped_dict, custom_snp_rules=snp_rules)
+    try:
+        qc_engine = DataQCEngine(df, custom_col_mapping=mapped_dict, custom_snp_rules=snp_rules)
+    except TypeError:
+        qc_engine = DataQCEngine(df, custom_col_mapping=mapped_dict)
+        if snp_rules:
+            try:
+                if hasattr(qc_engine, 'snp_rules'):
+                    for k, v in snp_rules.items():
+                        if k in qc_engine.snp_rules:
+                            qc_engine.snp_rules[k] = {**qc_engine.snp_rules[k], **v}
+                        else:
+                            qc_engine.snp_rules[k] = v
+            except Exception:
+                pass
     clean_df, qc_report = qc_engine.run_qc()
     full_results = DemographicStratifier.stratify_and_analyze(clean_df)
     return clean_df, qc_report, full_results
@@ -656,7 +675,22 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tupl
 # Execute Pipeline
 df_raw = st.session_state['uploaded_df']
 mapped_tuple = tuple(sorted(st.session_state['mapped_cols'].items()))
-snp_rules_items = tuple(sorted((k, tuple(sorted(v.items()))) for k, v in st.session_state.get('custom_snp_rules', {}).items())) if st.session_state.get('custom_snp_rules') else ()
+
+def serialize_rules(rules_dict):
+    if not rules_dict:
+        return ()
+    serialized = []
+    for k, v in sorted(rules_dict.items()):
+        inner_items = []
+        for sk, sv in sorted(v.items()):
+            if isinstance(sv, (set, list, tuple)):
+                inner_items.append((sk, tuple(sorted(sv))))
+            else:
+                inner_items.append((sk, sv))
+        serialized.append((k, tuple(inner_items)))
+    return tuple(serialized)
+
+snp_rules_items = serialize_rules(st.session_state.get('custom_snp_rules', {}))
 clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items)
 processed_df = full_results.get('processed_dataframe', pd.DataFrame())
 
@@ -3073,7 +3107,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             final_mapping[m_col] = m_info['std_name']
                             perm_list = m_info.get('permitted_genotypes', [])
                             if perm_list:
-                                clean_perms = {g.replace('/', '').replace('|', '').replace(' ', '') for g in perm_list}
+                                clean_perms = tuple(sorted(set(g.replace('/', '').replace('|', '').replace(' ', '') for g in perm_list if g.strip())))
                                 custom_rules_for_qc[m_info['std_name']] = {
                                     'ref_allele': m_info['ref_allele'],
                                     'var_allele': m_info['var_allele'],
