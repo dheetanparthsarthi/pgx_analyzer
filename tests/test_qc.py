@@ -48,3 +48,38 @@ def test_ag_and_tc_are_invalid():
     assert pd.isna(clean_df.loc[clean_df['Sample_ID'] == 'S2', 'CYP2C19*17'].iloc[0])
     assert clean_df.loc[clean_df['Sample_ID'] == 'S3', 'CYP2C19*17'].iloc[0] == 'CC'
     assert clean_df.loc[clean_df['Sample_ID'] == 'S4', 'CYP2C19*17'].iloc[0] == 'TT'
+
+
+def test_custom_permitted_genotypes_strict_flagging():
+    """Verify that when a doctor permits only CC and CT, extra TT calls are strictly flagged as invalid."""
+    data = {
+        'Sample_ID': ['S1', 'S2', 'S3', 'S4'],
+        'Raw_SNP_Col': ['CC', 'CT', 'TT', 'CC']
+    }
+    df = pd.DataFrame(data)
+    custom_map = {'Raw_SNP_Col': 'Custom_Locus'}
+    # Doctor allows only CC and CT; TT is unmapped/unexpected
+    custom_rules = {
+        'Custom_Locus': {
+            'ref_allele': 'C',
+            'var_allele': 'T',
+            'valid_genotypes': ('CC', 'CT', 'TC')
+        }
+    }
+    qc_engine = DataQCEngine(df, custom_col_mapping=custom_map, custom_snp_rules=custom_rules)
+    clean_df, report = qc_engine.run_qc()
+
+    # CC and CT must be retained
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S1', 'Custom_Locus'].iloc[0] == 'CC'
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S2', 'Custom_Locus'].iloc[0] == 'CT'
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S4', 'Custom_Locus'].iloc[0] == 'CC'
+
+    # TT must be strictly converted to NaN and logged in invalid_genotypes_log
+    assert pd.isna(clean_df.loc[clean_df['Sample_ID'] == 'S3', 'Custom_Locus'].iloc[0])
+    assert 'Custom_Locus' in report['invalid_genotypes_log']
+    assert report['invalid_genotypes_log']['Custom_Locus'][0]['sample_id'] == 'S3'
+    assert report['invalid_genotypes_log']['Custom_Locus'][0]['raw_value'] == 'TT'
+    assert report['snp_qc_stats']['Custom_Locus']['invalid_samples'] == 1
+    assert report['invalid_genotypes_count'] == 1
+
+

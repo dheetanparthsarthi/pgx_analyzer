@@ -2811,8 +2811,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 def get_marker_defaults(marker_label: str, sel_gene: str, detected_calls: list = None):
                     """
-                    Intelligently determines defaults for a marker WITHOUT rigid hardcoding.
-                    Prioritizes actual data detected in the column over static presets.
+                    Intelligently determines defaults for a marker.
+                    Prioritizes standard biological definitions for catalog PGx markers,
+                    adapting permitted calls if cohort contains a valid subset (e.g. only CC and CT).
+                    For custom markers, infers alleles from detected data.
                     """
                     clean_label = str(marker_label).strip()
                     if ' ' in clean_label and '(' in clean_label:
@@ -2820,43 +2822,51 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     else:
                         base_name = clean_label
 
-                    # Priority 1: If detected calls exist in data, directly derive defaults from observed data!
-                    if detected_calls and len(detected_calls) > 0:
-                        auto_r, auto_v = extract_alleles_from_calls(detected_calls)
-                        def_p = ", ".join(detected_calls)
-                        badge_s = f"Observed: {def_p}"
-                        badge_d = f"Auto-configured from dataset: <b>{def_p}</b> | Inferred Ref: <b>{auto_r}</b>, Var: <b>{auto_v}</b>"
-                        return base_name, auto_r, auto_v, def_p, badge_s, badge_d
-
-                    # Priority 2: Standard PGx Catalog presets as initial suggestions
                     norm_lbl = clean_label.lower().replace(" ", "").replace("_", "").replace("-", "")
                     norm_gene = sel_gene.upper().strip()
 
+                    catalog_rule = None
                     if norm_gene == 'CYP2C19':
                         if "*2" in norm_lbl or "rs4244285" in norm_lbl:
-                            return 'CYP2C19*2', 'G', 'A', 'GA, GG, AA', "Default: GA, GG, AA", "Standard calls: <b>GA</b> (Het), <b>GG</b> (Wild-type), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
+                            catalog_rule = ('CYP2C19*2', 'G', 'A', 'GA, GG, AA', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>A</b>")
                         elif "*3" in norm_lbl or "rs4986893" in norm_lbl:
-                            return 'CYP2C19*3', 'G', 'None', 'GG', "Default: GG", "Standard call: <b>GG</b> (Wild-Type) | Ref: <b>G</b>, Var: <b>None</b> (or A if variant present)"
+                            catalog_rule = ('CYP2C19*3', 'G', 'None', 'GG', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>None</b> (or A)")
                         elif "*17" in norm_lbl or "rs12248560" in norm_lbl:
-                            return 'CYP2C19*17', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                            catalog_rule = ('CYP2C19*17', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
                     elif norm_gene == 'CYP2C9':
                         if "*2" in norm_lbl or "rs1799853" in norm_lbl:
-                            return 'CYP2C9*2', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                            catalog_rule = ('CYP2C9*2', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
                         elif "*3" in norm_lbl or "rs1057910" in norm_lbl:
-                            return 'CYP2C9*3', 'A', 'C', 'AA, AC, CC', "Default: AA, AC, CC", "Standard calls: <b>AA</b> (Wild-type), <b>AC</b> (Het), <b>CC</b> (Hom Var) | Ref: <b>A</b>, Var: <b>C</b>"
+                            catalog_rule = ('CYP2C9*3', 'A', 'C', 'AA, AC, CC', "PGx Standard", "Standard biological alleles: Ref: <b>A</b>, Var: <b>C</b>")
                     elif norm_gene == 'VKORC1':
                         if "1639" in norm_lbl or "rs9923231" in norm_lbl or "*2" in norm_lbl:
-                            return 'VKORC1-1639G>A', 'G', 'A', 'GG, GA, AA', "Default: GG, GA, AA", "Standard calls: <b>GG</b> (Wild-type), <b>GA</b> (Het), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
+                            catalog_rule = ('VKORC1-1639G>A', 'G', 'A', 'GG, GA, AA', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>A</b>")
                     elif norm_gene == 'CYP2D6':
                         if "*4" in norm_lbl or "rs3892097" in norm_lbl:
-                            return 'CYP2D6*4', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                            catalog_rule = ('CYP2D6*4', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
                         elif "*10" in norm_lbl or "rs1065852" in norm_lbl:
-                            return 'CYP2D6*10', 'C', 'T', 'CC, CT, TT', "Default: CC, CT, TT", "Standard calls: <b>CC</b> (Wild-type), <b>CT</b> (Het), <b>TT</b> (Hom Var) | Ref: <b>C</b>, Var: <b>T</b>"
+                            catalog_rule = ('CYP2D6*10', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
                     elif norm_gene == 'DPYD':
                         if "*2a" in norm_lbl or "rs3918290" in norm_lbl:
-                            return 'DPYD*2A', 'G', 'A', 'GG, GA, AA', "Default: GG, GA, AA", "Standard calls: <b>GG</b> (Wild-type), <b>GA</b> (Het), <b>AA</b> (Hom Var) | Ref: <b>G</b>, Var: <b>A</b>"
+                            catalog_rule = ('DPYD*2A', 'G', 'A', 'GG, GA, AA', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>A</b>")
                         elif "*13" in norm_lbl or "rs55886062" in norm_lbl:
-                            return 'DPYD*13', 'C', 'G', 'CC, CG, GG', "Default: CC, CG, GG", "Standard calls: <b>CC</b> (Wild-type), <b>CG</b> (Het), <b>GG</b> (Hom Var) | Ref: <b>C</b>, Var: <b>G</b>"
+                            catalog_rule = ('DPYD*13', 'C', 'G', 'CC, CG, GG', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>G</b>")
+
+                    if catalog_rule:
+                        cat_name, cat_ref, cat_var, cat_perm, cat_s, cat_d = catalog_rule
+                        # If detected calls are biologically compatible with this marker's alleles, adapt permitted list to observed calls
+                        if detected_calls and len(detected_calls) > 0:
+                            det_nucs = {ch for c in detected_calls for ch in str(c).upper() if ch in 'ACGT'}
+                            expected_nucs = {cat_ref} | ({cat_var} if cat_var != 'None' else set())
+                            if det_nucs.issubset(expected_nucs):
+                                return cat_name, cat_ref, cat_var, ", ".join(detected_calls), f"Observed: {', '.join(detected_calls)}", f"Auto-configured from dataset: <b>{', '.join(detected_calls)}</b> | Standard Ref: <b>{cat_ref}</b>, Var: <b>{cat_var}</b>"
+                        return catalog_rule
+
+                    # Priority 2: Custom marker derivation from data
+                    if detected_calls and len(detected_calls) > 0:
+                        auto_r, auto_v = extract_alleles_from_calls(detected_calls)
+                        def_p = ", ".join(detected_calls)
+                        return base_name, auto_r, auto_v, def_p, f"Observed: {def_p}", f"Custom Marker | Ref: <b>{auto_r}</b>, Var: <b>{auto_v}</b>"
 
                     return base_name, 'A', 'G', 'AA, AG, GG', "Custom Target", f"Configurable mapping and rules for <b>{marker_label}</b>"
 
@@ -2894,20 +2904,41 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     cur_markers.append(new_marker_lbl)
                     st.session_state['selected_markers'] = cur_markers
 
-                def cb_set_preset(p_k, p_val, r_k, v_k, r_val, v_val, sel_r_k, sel_v_k):
-                    st.session_state[p_k] = p_val
-                    st.session_state[r_k] = r_val
-                    st.session_state[v_k] = v_val
-                    if sel_r_k:
-                        st.session_state[sel_r_k] = r_val if r_val in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
-                        if r_val not in ['A', 'C', 'G', 'T']:
-                            idx_str = sel_r_k.split('_')[-1]
-                            st.session_state[f"custom_ref_in_{idx_str}"] = r_val
-                    if sel_v_k:
-                        st.session_state[sel_v_k] = v_val if v_val in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
-                        if v_val not in ['A', 'C', 'G', 'T', 'None']:
-                            idx_str = sel_v_k.split('_')[-1]
-                            st.session_state[f"custom_var_in_{idx_str}"] = v_val
+                def cb_toggle_permitted_call(p_k, call, r_k, v_k, sel_r_k, sel_v_k):
+                    cur_p = str(st.session_state.get(p_k, "")).strip()
+                    calls = [g.strip().upper() for g in cur_p.split(',') if g.strip()]
+                    call_u = str(call).strip().upper()
+                    if call_u in calls:
+                        calls.remove(call_u)
+                    else:
+                        calls.append(call_u)
+                    new_p = ", ".join(calls)
+                    st.session_state[p_k] = new_p
+                    if calls:
+                        r_c, v_c = extract_alleles_from_calls(calls)
+                        if r_c:
+                            st.session_state[r_k] = r_c
+                            if sel_r_k:
+                                st.session_state[sel_r_k] = r_c if r_c in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
+                        if v_c:
+                            st.session_state[v_k] = v_c
+                            if sel_v_k:
+                                st.session_state[sel_v_k] = v_c if v_c in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
+
+                def cb_allow_all_detected(p_k, calls_list, r_k, v_k, sel_r_k, sel_v_k):
+                    st.session_state[p_k] = ", ".join(calls_list)
+                    r_c, v_c = extract_alleles_from_calls(calls_list)
+                    if r_c:
+                        st.session_state[r_k] = r_c
+                        if sel_r_k:
+                            st.session_state[sel_r_k] = r_c if r_c in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
+                    if v_c:
+                        st.session_state[v_k] = v_c
+                        if sel_v_k:
+                            st.session_state[sel_v_k] = v_c if v_c in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
+
+                def cb_clear_permitted(p_k):
+                    st.session_state[p_k] = ""
 
                 def cb_automap_detected(p_k, calls_list, r_k, v_k, sel_r_k, sel_v_k):
                     st.session_state[p_k] = ", ".join(calls_list)
@@ -3066,15 +3097,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if perm_key not in st.session_state:
                             st.session_state[perm_key] = def_permitted
 
-                        # SMART AUTO-ADAPT: If detected calls have zero overlap with current permitted genotypes,
-                        # automatically adapt to detected calls
-                        cur_perm_tokens = [x.strip().upper() for x in str(st.session_state.get(perm_key, '')).split(',') if x.strip()]
-                        if detected_calls_list and not any(c in cur_perm_tokens for c in detected_calls_list):
-                            st.session_state[perm_key] = ", ".join(detected_calls_list)
-                            auto_r, auto_v = extract_alleles_from_calls(detected_calls_list)
-                            if auto_r: st.session_state[ref_key] = auto_r
-                            if auto_v: st.session_state[var_key] = auto_v
-
                         cur_marker_name = st.session_state.get(name_key, std_name)
                         st.markdown(f"""
                         <div class="clean-card-box" style="margin-bottom: 8px; border-left: 4px solid #3B82F6;">
@@ -3120,20 +3142,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                             st.button("🗑️ Remove", key=f"btn_remove_marker_{idx}", on_click=cb_remove_marker_card, args=(idx,), help=f"Remove marker from mapping")
 
-                        if detected_calls_list:
-                            c_det_a, c_det_b = st.columns([1.8, 1.2])
-                            with c_det_a:
-                                pill_html = " ".join([f"<span style='background:#F1F5F9; color:#0F172A; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #CBD5E1;'>{c} ({observed_counts[c]})</span>" for c in detected_calls_list])
-                                st.markdown(f"<div style='font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase;'>Detected Calls in `{sel_col}` ({tot_samples_col:,} samples):</div><div style='margin-top:2px;'>{pill_html}</div>", unsafe_allow_html=True)
-                            with c_det_b:
-                                st.button(
-                                    f"⚡ Auto-Map All Detected Calls ({', '.join(detected_calls_list)})",
-                                    key=f"btn_automap_detected_{idx}",
-                                    on_click=cb_automap_detected,
-                                    args=(perm_key, detected_calls_list, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"),
-                                    help="Adopt all detected calls as permitted combinations and align alleles automatically"
-                                )
-
+                        # Ref and Var Alleles Row
                         c2_m, c3_m = st.columns(2)
                         with c2_m:
                             ref_choices = ['A', 'C', 'G', 'T', 'Other (Manual)']
@@ -3161,27 +3170,15 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 var_val = sel_var_choice
                             st.session_state[var_key] = var_val
 
-                        # Permitted Genotypes Row & Combination Helpers
+                        # Permitted Genotypes Input Row
                         c_perm_in, c_perm_info = st.columns([1.6, 1.4])
                         with c_perm_in:
                             perm_val = st.text_input(
-                                "Permitted Genotype Combinations (comma-separated):",
+                                "Permitted Genotypes (comma-separated):",
                                 value=st.session_state.get(perm_key, def_permitted),
                                 key=perm_key,
-                                help="Enter any combination of genotypes, e.g. GA, GG, AG, CC, CT, TT, AA, AC..."
+                                help="Type any combinations e.g. CC, CT or GG, GA or AA or TT..."
                             )
-                            # Quick Preset Buttons
-                            st.caption("Quick Preset Combinations:")
-                            c_p1, c_p2, c_p3, c_p4 = st.columns(4)
-                            c_p1.button("CC, CT, TT", key=f"btn_p_cctt_{idx}", use_container_width=True,
-                                        on_click=cb_set_preset, args=(perm_key, "CC, CT, TT", ref_key, var_key, "C", "T", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
-                            c_p2.button("GA, GG, AG", key=f"btn_p_gaag_{idx}", use_container_width=True,
-                                        on_click=cb_set_preset, args=(perm_key, "GA, GG, AG", ref_key, var_key, "G", "A", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
-                            c_p3.button("AA, AC, CC", key=f"btn_p_aacc_{idx}", use_container_width=True,
-                                        on_click=cb_set_preset, args=(perm_key, "AA, AC, CC", ref_key, var_key, "A", "C", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
-                            c_p4.button("GA, GG, AA", key=f"btn_p_ggaa_{idx}", use_container_width=True,
-                                        on_click=cb_set_preset, args=(perm_key, "GA, GG, AA", ref_key, var_key, "G", "A", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
-
                         with c_perm_info:
                             hom_ref_str = f"{ref_val}{ref_val}" if ref_val else "N/A"
                             het_str = f"{ref_val}{var_val}" if (ref_val and var_val and var_val != 'None') else "N/A"
@@ -3197,6 +3194,54 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             </div>
                             """, unsafe_allow_html=True)
 
+                        # Interactive Call Toggle Chips (Manual Selection directly from Observed Data)
+                        if detected_calls_list:
+                            st.markdown("<div style='font-size: 11px; font-weight: 700; color: #475569; margin-top: 6px; margin-bottom: 4px; text-transform: uppercase;'>Observed Calls in this Column — Click chip to toggle in/out of permitted rules:</div>", unsafe_allow_html=True)
+                            cur_perm_tokens_set = {x.strip().upper().replace('/', '').replace('|', '').replace(' ', '') for x in str(st.session_state.get(perm_key, '')).split(',') if x.strip()}
+
+                            n_items = len(detected_calls_list)
+                            chunk_size = 5
+                            for c_start in range(0, n_items, chunk_size):
+                                c_chunk = detected_calls_list[c_start:c_start + chunk_size]
+                                is_first_row = (c_start == 0)
+
+                                col_widths = [1] * len(c_chunk)
+                                if is_first_row:
+                                    col_widths.extend([1.3, 0.9])
+                                    chip_cols = st.columns(col_widths)
+                                    for c_i, call_item in enumerate(c_chunk):
+                                        cnt = observed_counts.get(call_item, 0)
+                                        is_active = call_item in cur_perm_tokens_set
+                                        btn_lbl = f"✅ {call_item} ({cnt:,})" if is_active else f"➕ {call_item} ({cnt:,})"
+                                        chip_cols[c_i].button(
+                                            btn_lbl,
+                                            key=f"btn_chip_{idx}_{call_item}",
+                                            type="primary" if is_active else "secondary",
+                                            use_container_width=True,
+                                            on_click=cb_toggle_permitted_call,
+                                            args=(perm_key, call_item, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"),
+                                            help=f"Click to {'remove' if is_active else 'permit'} {call_item}"
+                                        )
+                                    chip_cols[-2].button("⚡ Allow All", key=f"btn_chip_all_{idx}", use_container_width=True,
+                                                        on_click=cb_allow_all_detected, args=(perm_key, detected_calls_list, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"), help="Add all observed calls to permitted list")
+                                    chip_cols[-1].button("🧹 Clear", key=f"btn_chip_clr_{idx}", use_container_width=True,
+                                                        on_click=cb_clear_permitted, args=(perm_key,), help="Clear permitted list")
+                                else:
+                                    chip_cols = st.columns(col_widths)
+                                    for c_i, call_item in enumerate(c_chunk):
+                                        cnt = observed_counts.get(call_item, 0)
+                                        is_active = call_item in cur_perm_tokens_set
+                                        btn_lbl = f"✅ {call_item} ({cnt:,})" if is_active else f"➕ {call_item} ({cnt:,})"
+                                        chip_cols[c_i].button(
+                                            btn_lbl,
+                                            key=f"btn_chip_{idx}_{call_item}",
+                                            type="primary" if is_active else "secondary",
+                                            use_container_width=True,
+                                            on_click=cb_toggle_permitted_call,
+                                            args=(perm_key, call_item, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"),
+                                            help=f"Click to {'remove' if is_active else 'permit'} {call_item}"
+                                        )
+
                         # Parse permitted genotypes & expanded set
                         raw_perm_list = [g.strip().upper() for g in perm_val.split(',') if g.strip()]
                         valid_clean_set = {g.replace('/', '').replace('|', '').replace(' ', '') for g in raw_perm_list}
@@ -3205,7 +3250,57 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             if len(g) == 2:
                                 expanded_set.add(g[1] + g[0])
 
-                        # LIVE DATA CHECK & FLAGGING SYSTEM
+                        # LIVE DATA AUDIT & STRICT DETECTION / FLAGGING ENGINE
+                        # CHECK 1: Detect Non-Genomic / Demographic / Text Column
+                        METADATA_WORDS = {
+                            'MALE', 'FEMALE', 'MAN', 'WOMAN', 'UNKNOWN', 'NULL', 'NONE', 'NAN',
+                            'CASE', 'CONTROL', 'YES', 'NO', 'TRUE', 'FALSE', 'POS', 'NEG',
+                            'POSITIVE', 'NEGATIVE', 'NORMAL', 'MUTANT', 'HETEROZYGOUS', 'HOMOZYGOUS',
+                            'INDIA', 'DELHI', 'PUNJAB', 'MAHARASHTRA', 'TAMIL', 'GUJARAT', 'KERALA',
+                            'PATIENT', 'SAMPLE', 'CONTROL_GROUP', 'CASE_GROUP'
+                        }
+                        suspicious_calls = []
+                        for c in detected_calls_list:
+                            c_u = str(c).strip().upper()
+                            if c_u in METADATA_WORDS or len(c_u) > 6 or any(ch.isdigit() for ch in c_u) or any(ch not in 'ACGTID/*|- ' for ch in c_u):
+                                suspicious_calls.append(c)
+
+                        is_metadata_col = bool(suspicious_calls and (len(suspicious_calls) >= len(detected_calls_list) * 0.5 or any(c.strip().upper() in METADATA_WORDS for c in detected_calls_list)))
+                        if is_metadata_col:
+                            mapping_has_errors = True
+                            st.markdown(f"""
+                            <div style="background: #FEF2F2; border: 2px solid #EF4444; border-radius: 8px; padding: 12px; margin-top: 10px; margin-bottom: 8px;">
+                                <div style="font-weight: 800; color: #991B1B; font-size: 14px;">🚨 WRONG COLUMN DETECTED: Non-Genotype Data in `{sel_col}`</div>
+                                <div style="color: #7F1D1D; font-size: 13px; margin-top: 4px;">
+                                    Column <code>{sel_col}</code> appears to contain demographic or text values (e.g. <b>{suspicious_calls[:4]}</b>) rather than genetic marker calls. Please select a valid genotype column above.
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        # CHECK 2: Severe Allele Disconnect / Wrong Marker Column
+                        col_nucleotides = {ch for call in detected_calls_list for ch in str(call).upper() if ch in 'ACGT'}
+                        configured_alleles = {ch for ch in [ref_val, var_val] if ch in 'ACGT'}
+                        is_severe_disconnect = bool(col_nucleotides and configured_alleles and not col_nucleotides.intersection(configured_alleles))
+                        if is_severe_disconnect and not is_metadata_col:
+                            st.markdown(f"""
+                            <div style="background: #FFF7ED; border: 2px solid #F97316; border-radius: 8px; padding: 12px; margin-top: 10px; margin-bottom: 8px;">
+                                <div style="font-weight: 800; color: #9A3412; font-size: 14px;">🚨 SEVERE ALLELE MISMATCH: Possible Wrong Column Selected!</div>
+                                <div style="color: #7C2D12; font-size: 13px; margin-top: 4px;">
+                                    Observed calls in <code>{sel_col}</code> are <b>{detected_calls_list}</b> (nucleotides: <b>{sorted(col_nucleotides)}</b>).<br>
+                                    These have <b>ZERO overlap</b> with configured alleles for <b>{user_marker_name}</b> (Ref: <b>{ref_val}</b>, Var: <b>{var_val}</b>).<br>
+                                    Please verify if you selected the wrong column, or click below to align your alleles to this column if intended.
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            cand_col_r, cand_col_v = extract_alleles_from_calls(detected_calls_list)
+                            st.button(
+                                f"⚡ Align Alleles to this Column (Ref: {cand_col_r}, Var: {cand_col_v})",
+                                key=f"btn_align_severe_{idx}",
+                                on_click=cb_align_alleles,
+                                args=(ref_key, var_key, cand_col_r, cand_col_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                            )
+
+                        # CHECK 3: Extra / Unmapped Calls in Dataset
                         unexpected_calls = [k for k in observed_counts.keys() if k not in expanded_set] if observed_counts else []
                         tot_unmapped_cnt = sum(observed_counts[u] for u in unexpected_calls) if unexpected_calls else 0
                         unmapped_pct = (tot_unmapped_cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
@@ -3232,41 +3327,45 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                         'Observed Genotype': call,
                                         'Sample Count': cnt,
                                         'Cohort %': f"{pct:.1f}%",
-                                        'Mapping Status': "✅ Permitted" if is_covered else "🚨 Flagged: Unmapped"
+                                        'Mapping Status': "✅ Permitted" if is_covered else "🚨 Flagged: Unmapped (Extra)"
                                     })
                                 st.dataframe(pd.DataFrame(check_rows), use_container_width=True, hide_index=True)
                             else:
                                 st.info(f"ℹ️ No valid genotype calls found in column `{sel_col}`.")
 
                         with c_flg2:
-                            # Flag 1: Unmapped Calls
-                            if unexpected_calls:
+                            if not raw_perm_list:
+                                st.error(f"⛔ **Rule Error:** Please enter or select at least one permitted genotype for **{user_marker_name}**.")
+                                mapping_has_errors = True
+                            elif unexpected_calls:
                                 st.markdown(f"""
-                                <div style="background: #FEF2F2; border: 1.5px solid #F87171; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
-                                    <div style="font-weight: 700; color: #991B1B; font-size: 13px;">🚨 FLAG: Unmapped Calls in Dataset</div>
-                                    <div style="color: #7F1D1D; font-size: 12px; margin-top: 3px;">
-                                        Calls <code>{unexpected_calls}</code> ({tot_unmapped_cnt:,} sample(s), {unmapped_pct:.1f}%) not in Permitted Genotypes (<code>{perm_val}</code>).
+                                <div style="background: #FEF2F2; border: 1.5px solid #F87171; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+                                    <div style="font-weight: 700; color: #991B1B; font-size: 13px;">🚨 FLAGGED: Extra / Unmapped Entry in Dataset</div>
+                                    <div style="color: #7F1D1D; font-size: 12px; margin-top: 4px;">
+                                        Found <b>{len(unexpected_calls)} unmapped call(s)</b>: <code>{unexpected_calls}</code> ({tot_unmapped_cnt:,} sample(s), {unmapped_pct:.1f}% of cohort).<br>
+                                        Permitted genotypes are: <code>{perm_val}</code>.<br>
+                                        <i>These samples will be treated as invalid/missing during QC unless you explicitly allow them.</i>
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
                                 unexp_str = ", ".join(unexpected_calls)
                                 st.button(
-                                    f"➕ Allow Flagged Calls ({unexp_str}) into Permitted Genotypes",
+                                    f"➕ Allow Flagged Call(s) ({unexp_str}) into Permitted Genotypes",
                                     key=f"btn_add_unexp_{idx}",
                                     on_click=cb_add_unmapped,
                                     args=(perm_key, unexpected_calls, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
                                 )
                             elif tot_samples_col > 0:
                                 st.markdown(f"""
-                                <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
-                                    <div style="font-weight: 700; color: #166534; font-size: 13px;">✅ 100% Verified: All {tot_samples_col:,} Samples Permitted</div>
+                                <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+                                    <div style="font-weight: 700; color: #166534; font-size: 13px;">✅ 100% Cohort Verified: All {tot_samples_col:,} Samples Permitted</div>
                                     <div style="color: #14532D; font-size: 12px; margin-top: 3px;">
-                                        All observed calls in <code>{sel_col}</code> match your permitted genotype rules (<code>{', '.join(raw_perm_list)}</code>).
+                                        All observed calls in <code>{sel_col}</code> match your configured genotype rules (<code>{', '.join(raw_perm_list)}</code>).
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                            # Flag 2: Allele Mismatch
+                            # Flag: Allele Inconsistency
                             if (ref_mismatch or var_mismatch) and cand_r:
                                 st.markdown(f"""
                                 <div style="background: #FFFBEB; border: 1.5px solid #FCD34D; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
@@ -3283,7 +3382,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                     args=(ref_key, var_key, cand_r, cand_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
                                 )
 
-                            # Flag 3: Identical Alleles
+                            # Flag: Identical Alleles
                             if identical_alleles:
                                 st.error(f"⛔ FLAG: Reference allele ({ref_val}) and Variant allele ({var_val}) cannot be identical!")
 
