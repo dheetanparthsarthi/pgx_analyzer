@@ -1321,25 +1321,31 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     st.table(pd.DataFrame(al_rows))
                     
                 with c_fig:
-                    fig_df = pd.DataFrame([{'Genotype': k, 'Count': v} for k, v in g_c.items() if v > 0])
-                    fig_bar = px.bar(
-                        fig_df, x='Genotype', y='Count', 
-                        title=f"{snp_code} Genotype distribution ({sel_key})", 
-                        color='Genotype',
-                        color_discrete_sequence=['#15803D', '#1D4ED8', '#B91C1C']
-                    )
-                    fig_bar.update_layout(height=220, margin=dict(l=20, r=20, t=35, b=20))
-                    st.plotly_chart(fig_bar, use_container_width=True)
+                    fig_rows = [{'Genotype': str(k), 'Count': int(v)} for k, v in g_c.items() if v > 0]
+                    fig_df = pd.DataFrame(fig_rows, columns=['Genotype', 'Count'])
+                    if not fig_df.empty and len(fig_rows) > 0:
+                        fig_bar = px.bar(
+                            fig_df, x='Genotype', y='Count', 
+                            title=f"{snp_code} Genotype distribution ({sel_key})", 
+                            color='Genotype',
+                            color_discrete_sequence=['#15803D', '#1D4ED8', '#B91C1C']
+                        )
+                        fig_bar.update_layout(height=220, margin=dict(l=20, r=20, t=35, b=20))
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                    else:
+                        st.caption(f"No genotype calls to display for {snp_code}.")
 
-                    al_df = pd.DataFrame([{'Allele': k, 'Frequency (%)': a_p.get(k, 0)} for k, v in a_c.items()])
-                    fig_al = px.bar(
-                        al_df, x='Allele', y='Frequency (%)',
-                        title=f"{snp_code} Allele Frequencies ({sel_key})",
-                        color='Allele',
-                        color_discrete_sequence=['#0D9488', '#D97706']
-                    )
-                    fig_al.update_layout(height=200, margin=dict(l=20, r=20, t=35, b=20))
-                    st.plotly_chart(fig_al, use_container_width=True)
+                    al_rows_plot = [{'Allele': str(k), 'Frequency (%)': float(a_p.get(k, 0))} for k, v in a_c.items()]
+                    al_df = pd.DataFrame(al_rows_plot, columns=['Allele', 'Frequency (%)'])
+                    if not al_df.empty and len(al_rows_plot) > 0:
+                        fig_al = px.bar(
+                            al_df, x='Allele', y='Frequency (%)',
+                            title=f"{snp_code} Allele Frequencies ({sel_key})",
+                            color='Allele',
+                            color_discrete_sequence=['#0D9488', '#D97706']
+                        )
+                        fig_al.update_layout(height=200, margin=dict(l=20, r=20, t=35, b=20))
+                        st.plotly_chart(fig_al, use_container_width=True)
 
     # -------------------------------------------------------------------------
     # TAB 3: HARDY-WEINBERG
@@ -1398,19 +1404,28 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 st.dataframe(hwe_df, use_container_width=True, hide_index=True)
 
         with c_hwe_fig:
-            chi2_chart_df = pd.DataFrame([
-                {'SNP': snp_name, 'Chi2 Stat': s_res.get('hwe', {}).get('chi2_stat', 0)}
-                for snp_name, s_res in snps_data.items()
-            ])
-            fig_hwe = px.bar(
-                chi2_chart_df, x='SNP', y='Chi2 Stat',
-                title=f"HWE Chi-Square (χ²) Stats vs Threshold 3.4 ({sel_key})",
-                color='SNP',
-                color_discrete_sequence=['#2563EB', '#7C3AED', '#DB2777']
-            )
-            fig_hwe.add_hline(y=3.4, line_dash="dash", line_color="red", annotation_text="Critical Threshold (3.4)")
-            fig_hwe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
-            st.plotly_chart(fig_hwe, use_container_width=True)
+            chi2_rows = []
+            for snp_name, s_res in snps_data.items():
+                raw_c = s_res.get('hwe', {}).get('chi2_stat', 0.0)
+                try:
+                    c_num = float(raw_c) if (raw_c is not None and str(raw_c).strip() not in ['', 'nan', 'none', '-']) else 0.0
+                except (ValueError, TypeError):
+                    c_num = 0.0
+                chi2_rows.append({'SNP': str(snp_name), 'Chi2 Stat': c_num})
+
+            chi2_chart_df = pd.DataFrame(chi2_rows, columns=['SNP', 'Chi2 Stat'])
+            if not chi2_chart_df.empty and len(chi2_rows) > 0:
+                fig_hwe = px.bar(
+                    chi2_chart_df, x='SNP', y='Chi2 Stat',
+                    title=f"HWE Chi-Square (χ²) Stats vs Threshold 3.4 ({sel_key})",
+                    color='SNP',
+                    color_discrete_sequence=['#2563EB', '#7C3AED', '#DB2777']
+                )
+                fig_hwe.add_hline(y=3.4, line_dash="dash", line_color="red", annotation_text="Critical Threshold (3.4)")
+                fig_hwe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_hwe, use_container_width=True)
+            else:
+                st.info("No Chi-Square data available to plot for this cohort.")
         
         st.markdown("##### Table 3. Chi-Square Distribution Reference Table (df = 1, α = 0.05, Critical = 3.4)")
         chi2_ref_df = pd.DataFrame([{
@@ -1495,10 +1510,14 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 st.table(pd.DataFrame(dip_rows))
             elif view_choice == "📊 Diplotype counts":
                 st.markdown("#### Diplotype counts")
-                dip_fig_df = pd.DataFrame([{'Diplotype': k, 'Count': v['count']} for k, v in dips.items() if v['count'] > 0])
-                fig_dip = px.bar(dip_fig_df, x='Count', y='Diplotype', orientation='h', title="Diplotype counts", color_discrete_sequence=['#166534'])
-                fig_dip.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
-                st.plotly_chart(fig_dip, use_container_width=True)
+                dip_plot_rows = [{'Diplotype': str(k), 'Count': int(v['count'])} for k, v in dips.items() if v.get('count', 0) > 0]
+                dip_fig_df = pd.DataFrame(dip_plot_rows, columns=['Diplotype', 'Count'])
+                if not dip_fig_df.empty and len(dip_plot_rows) > 0:
+                    fig_dip = px.bar(dip_fig_df, x='Count', y='Diplotype', orientation='h', title="Diplotype counts", color_discrete_sequence=['#166534'])
+                    fig_dip.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
+                    st.plotly_chart(fig_dip, use_container_width=True)
+                else:
+                    st.info("No diplotype counts to display.")
             else:
                 c_dip, c_dip_chart = st.columns([1.1, 0.9])
                 with c_dip:
@@ -1506,10 +1525,14 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     dip_rows = [{'DIPLOTYPE': k, 'COUNT': v['count'], 'FREQUENCY': f"{v['percentage']:.1f}%"} for k, v in dips.items() if v['count'] > 0]
                     st.table(pd.DataFrame(dip_rows))
                 with c_dip_chart:
-                    dip_fig_df = pd.DataFrame([{'Diplotype': k, 'Count': v['count']} for k, v in dips.items() if v['count'] > 0])
-                    fig_dip = px.bar(dip_fig_df, x='Count', y='Diplotype', orientation='h', title="Diplotype counts", color_discrete_sequence=['#166534'])
-                    fig_dip.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
-                    st.plotly_chart(fig_dip, use_container_width=True)
+                    dip_plot_rows = [{'Diplotype': str(k), 'Count': int(v['count'])} for k, v in dips.items() if v.get('count', 0) > 0]
+                    dip_fig_df = pd.DataFrame(dip_plot_rows, columns=['Diplotype', 'Count'])
+                    if not dip_fig_df.empty and len(dip_plot_rows) > 0:
+                        fig_dip = px.bar(dip_fig_df, x='Count', y='Diplotype', orientation='h', title="Diplotype counts", color_discrete_sequence=['#166534'])
+                        fig_dip.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
+                        st.plotly_chart(fig_dip, use_container_width=True)
+                    else:
+                        st.info("No diplotype counts to display.")
 
         # 2. Metabolizer / Phenotype Classification
         if view_choice in ["👁️ Show All Views", "💊 Metabolizer / phenotype classification"]:
@@ -1521,17 +1544,20 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 phe_rows = [{'PHENOTYPE': k, 'COUNT': v['count'], 'PERCENTAGE': f"{v['percentage']:.1f}%"} for k, v in phenos.items() if v['count'] > 0]
                 st.table(pd.DataFrame(phe_rows))
             with c_phe_chart:
-                phe_labels = [k for k, v in phenos.items() if v['count'] > 0]
-                phe_counts = [v['count'] for k, v in phenos.items() if v['count'] > 0]
-                fig_donut = px.pie(
-                    names=phe_labels, 
-                    values=phe_counts, 
-                    hole=0.5, 
-                    title="Phenotype distribution", 
-                    color_discrete_sequence=['#166534', '#1E40AF', '#4B5563', '#991B1B', '#D97706', '#0D9488']
-                )
-                fig_donut.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
-                st.plotly_chart(fig_donut, use_container_width=True)
+                phe_labels = [str(k) for k, v in phenos.items() if v.get('count', 0) > 0]
+                phe_counts = [int(v['count']) for k, v in phenos.items() if v.get('count', 0) > 0]
+                if phe_labels and phe_counts and sum(phe_counts) > 0:
+                    fig_donut = px.pie(
+                        names=phe_labels, 
+                        values=phe_counts, 
+                        hole=0.5, 
+                        title="Phenotype distribution", 
+                        color_discrete_sequence=['#166534', '#1E40AF', '#4B5563', '#991B1B', '#D97706', '#0D9488']
+                    )
+                    fig_donut.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                    st.plotly_chart(fig_donut, use_container_width=True)
+                else:
+                    st.info("No phenotype calls to display.")
 
         # 3. Combination & Geographic Studio
         if view_choice in ["👁️ Show All Views", "🧩 Combination", "🗺️ Geographical & State-Wise Matrices"]:
@@ -1573,18 +1599,22 @@ def render_unified_results(full_results: dict, qc_report: dict):
             st.table(pd.DataFrame(qc_rows))
 
         with c_qc_fig:
-            qc_fig_df = pd.DataFrame([
-                {'SNP': snp, 'Valid': sdata['valid_samples'], 'Missing': sdata['missing_samples'], 'Invalid': sdata.get('invalid_samples', 0)}
-                for snp, sdata in qc_report['snp_qc_stats'].items()
-            ])
-            fig_qc = px.bar(
-                qc_fig_df, x='SNP', y=['Valid', 'Missing', 'Invalid'],
-                title="Sample Quality Audit Breakdown per SNP",
-                barmode='stack',
-                color_discrete_sequence=['#16A34A', '#EAB308', '#DC2626']
-            )
-            fig_qc.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
-            st.plotly_chart(fig_qc, use_container_width=True)
+            qc_plot_rows = [
+                {'SNP': str(snp), 'Valid': int(sdata.get('valid_samples', 0)), 'Missing': int(sdata.get('missing_samples', 0)), 'Invalid': int(sdata.get('invalid_samples', 0))}
+                for snp, sdata in qc_report.get('snp_qc_stats', {}).items()
+            ]
+            qc_fig_df = pd.DataFrame(qc_plot_rows, columns=['SNP', 'Valid', 'Missing', 'Invalid'])
+            if not qc_fig_df.empty and len(qc_plot_rows) > 0:
+                fig_qc = px.bar(
+                    qc_fig_df, x='SNP', y=['Valid', 'Missing', 'Invalid'],
+                    title="Sample Quality Audit Breakdown per SNP",
+                    barmode='stack',
+                    color_discrete_sequence=['#16A34A', '#EAB308', '#DC2626']
+                )
+                fig_qc.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_qc, use_container_width=True)
+            else:
+                st.info("No QC chart data available.")
 
     # -------------------------------------------------------------------------
     # TAB 7: GEOGRAPHIC POPULATION GROUPS
@@ -1624,36 +1654,48 @@ def render_unified_results(full_results: dict, qc_report: dict):
             geo_marker_data = []
             for r in regions:
                 r_snps = reg.get(r, {}).get('snps', {})
-                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*2 (f_A)', 'Minor Allele Frequency': r_snps.get('CYP2C19*2', {}).get('allele_freqs', {}).get('A', 0)})
-                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*3 (f_A)', 'Minor Allele Frequency': r_snps.get('CYP2C19*3', {}).get('allele_freqs', {}).get('A', 0)})
-                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*17 (f_T)', 'Minor Allele Frequency': r_snps.get('CYP2C19*17', {}).get('allele_freqs', {}).get('T', 0)})
-            fig_geo_all = px.bar(
-                pd.DataFrame(geo_marker_data),
-                x='Geographic Group', y='Minor Allele Frequency',
-                color='Biomarker', barmode='group',
-                title="All Biomarkers (CYP2C19*2, *3, *17) MAF Across Geographic Groups",
-                color_discrete_map={'CYP2C19*2 (f_A)': '#2563EB', 'CYP2C19*3 (f_A)': '#059669', 'CYP2C19*17 (f_T)': '#D97706'}
-            )
-            fig_geo_all.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
-            st.plotly_chart(fig_geo_all, use_container_width=True)
+                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*2 (f_A)', 'Minor Allele Frequency': float(r_snps.get('CYP2C19*2', {}).get('allele_freqs', {}).get('A', 0))})
+                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*3 (f_A)', 'Minor Allele Frequency': float(r_snps.get('CYP2C19*3', {}).get('allele_freqs', {}).get('A', 0))})
+                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*17 (f_T)', 'Minor Allele Frequency': float(r_snps.get('CYP2C19*17', {}).get('allele_freqs', {}).get('T', 0))})
+            geo_df = pd.DataFrame(geo_marker_data, columns=['Geographic Group', 'Biomarker', 'Minor Allele Frequency'])
+            if not geo_df.empty:
+                fig_geo_all = px.bar(
+                    geo_df,
+                    x='Geographic Group', y='Minor Allele Frequency',
+                    color='Biomarker', barmode='group',
+                    title="All Biomarkers (CYP2C19*2, *3, *17) MAF Across Geographic Groups",
+                    color_discrete_map={'CYP2C19*2 (f_A)': '#2563EB', 'CYP2C19*3 (f_A)': '#059669', 'CYP2C19*17 (f_T)': '#D97706'}
+                )
+                fig_geo_all.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_geo_all, use_container_width=True)
 
         with c_geo2:
             geo_pheno_data = []
             for r in regions:
                 p_dict = reg.get(r, {}).get('cyp2c19_summary', {}).get('phenotypes', {})
-                pm_pct = p_dict.get('Poor Metabolizer', p_dict.get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
-                im_pct = p_dict.get('Intermediate Metabolizer', p_dict.get('Intermediate Metabolizer (IM)', {})).get('percentage', 0.0)
+                pm_val = p_dict.get('Poor Metabolizer', p_dict.get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
+                im_val = p_dict.get('Intermediate Metabolizer', p_dict.get('Intermediate Metabolizer (IM)', {})).get('percentage', 0.0)
+                try:
+                    pm_pct = float(pm_val)
+                except (ValueError, TypeError):
+                    pm_pct = 0.0
+                try:
+                    im_pct = float(im_val)
+                except (ValueError, TypeError):
+                    im_pct = 0.0
                 geo_pheno_data.append({'Geographic Group': r, 'Phenotype': 'Poor Metabolizer (PM %)', 'Percentage': pm_pct})
                 geo_pheno_data.append({'Geographic Group': r, 'Phenotype': 'Intermediate Metabolizer (IM %)', 'Percentage': im_pct})
-            fig_geo_pm = px.bar(
-                pd.DataFrame(geo_pheno_data),
-                x='Geographic Group', y='Percentage',
-                color='Phenotype', barmode='group',
-                title="Clinical Phenotypes (PM & IM %) Across Geographic Groups",
-                color_discrete_map={'Poor Metabolizer (PM %)': '#DC2626', 'Intermediate Metabolizer (IM %)': '#D97706'}
-            )
-            fig_geo_pm.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
-            st.plotly_chart(fig_geo_pm, use_container_width=True)
+            geo_pm_df = pd.DataFrame(geo_pheno_data, columns=['Geographic Group', 'Phenotype', 'Percentage'])
+            if not geo_pm_df.empty:
+                fig_geo_pm = px.bar(
+                    geo_pm_df,
+                    x='Geographic Group', y='Percentage',
+                    color='Phenotype', barmode='group',
+                    title="Clinical Phenotypes (PM & IM %) Across Geographic Groups",
+                    color_discrete_map={'Poor Metabolizer (PM %)': '#DC2626', 'Intermediate Metabolizer (IM %)': '#D97706'}
+                )
+                fig_geo_pm.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_geo_pm, use_container_width=True)
 
         st.markdown("#### Comprehensive Population Statistical Summary Matrix")
         
