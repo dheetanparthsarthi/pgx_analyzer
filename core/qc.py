@@ -15,13 +15,20 @@ logger = logging.getLogger(__name__)
 
 
 class DataQCEngine:
-    def __init__(self, df: pd.DataFrame, existing_sample_ids: Set[str] = None, custom_col_mapping: Dict[str, str] = None):
+    def __init__(self, df: pd.DataFrame, existing_sample_ids: Set[str] = None, custom_col_mapping: Dict[str, str] = None, custom_snp_rules: Dict[str, Dict] = None):
         """
         Initialize QC Engine with a raw DataFrame.
         """
         self.raw_df = df.copy()
         self.existing_sample_ids = set(existing_sample_ids) if existing_sample_ids else set()
         self.custom_col_mapping = custom_col_mapping or {}
+        self.snp_rules = dict(SNP_CONFIG)
+        if custom_snp_rules:
+            for k, v in custom_snp_rules.items():
+                if k in self.snp_rules:
+                    self.snp_rules[k] = {**self.snp_rules[k], **v}
+                else:
+                    self.snp_rules[k] = v
         self.clean_df = pd.DataFrame()
         self.qc_report = {}
 
@@ -120,7 +127,7 @@ class DataQCEngine:
         snp_qc_stats = {}
         invalid_genotypes_log = {}
         
-        for snp_name, snp_info in SNP_CONFIG.items():
+        for snp_name, snp_info in self.snp_rules.items():
             if snp_name in df.columns:
                 raw_vals = self._get_series(df, snp_name)
                 
