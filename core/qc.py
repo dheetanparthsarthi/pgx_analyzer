@@ -135,8 +135,8 @@ class DataQCEngine:
                 def clean_genotype(val):
                     if pd.isna(val):
                         return np.nan
-                    v = str(val).strip().upper().replace('/', '')
-                    if v in ['', 'NAN', 'NONE', 'NULL', 'NA', '?']:
+                    v = str(val).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
+                    if v in ['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN']:
                         return np.nan
                     
                     if v in snp_info['valid_genotypes']:
@@ -147,7 +147,7 @@ class DataQCEngine:
                 
                 # Detect invalid non-empty values
                 raw_str = raw_vals.astype(str).str.strip().str.upper()
-                raw_not_na = raw_vals.notna() & (~raw_str.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?']))
+                raw_not_na = raw_vals.notna() & (~raw_str.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN']))
                 invalid_mask = raw_not_na & cleaned_vals.isna()
                 invalid_samples = df.loc[invalid_mask, 'Sample_ID'].tolist()
                 invalid_raw_vals = raw_vals.loc[invalid_mask].tolist()

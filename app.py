@@ -781,61 +781,95 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     # -------------------------------------------------------------------------
     # STUDIO CONTAINER & HEADER (CLEAN, COMPACT TYPOGRAPHY)
     # -------------------------------------------------------------------------
-    st.markdown("""
+    target_gene = full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+    st.markdown(f"""
     <div style="border-top: 1px solid #E2E8F0; margin-top: 1.5rem; padding-top: 1rem; margin-bottom: 0.75rem;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
-                <span style="font-size: 16px; font-weight: 700; color: #0F172A;">🧩 CYP2C19 Multi-Variant & Geographic Studio</span>
-                <span style="margin-left: 8px; font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 7px; border-radius: 4px; border: 1px solid #CBD5E1;">CPIC v2024 / PharmGKB</span>
+                <span style="font-size: 16px; font-weight: 700; color: #0F172A;">🧩 {target_gene} Multi-Variant & Geographic Studio</span>
+                <span style="margin-left: 8px; font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 7px; border-radius: 4px; border: 1px solid #CBD5E1;">CPIC / PharmGKB</span>
             </div>
         </div>
         <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748B;">
-            Standardized multi-locus genotype stratification, scientific nomenclature mapping (HGVS / rsID), and sub-population distribution analysis.
+            Standardized multi-locus genotype stratification, scientific nomenclature mapping, and sub-population distribution analysis.
         </p>
     </div>
     """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # 1. VARIANT COMBINATION FOCUS SELECTOR (STANDARD SCIENTIFIC NOMENCLATURE)
+    # 1. VARIANT COMBINATION FOCUS SELECTOR (DYNAMIC ACROSS GENES)
     # -------------------------------------------------------------------------
-    st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
-    
-    variant_combo_choice = st.radio(
-        "Variant Combination:",
-        [
-            "CYP2C19 *2 + *3 (c.681G>A / c.636G>A · Loss of Function)",
-            "CYP2C19 *2 + *17 (c.681G>A / c.-806C>T · LOF + Increased Function)",
-            "CYP2C19 *3 + *17 (c.636G>A / c.-806C>T · LOF + Increased Function)",
-            "CYP2C19 Core Panel (*2 + *3 + *17 · Full 3-Locus Trio)"
-        ],
-        horizontal=True,
-        key="studio_variant_combo_choice",
-        label_visibility="collapsed"
-    )
+    mapped_snps_in_df = [c for c in full_results.get('snps', {}).keys() if c in processed_df.columns]
+    if not mapped_snps_in_df:
+        mapped_snps_in_df = [c for c in processed_df.columns if c not in [
+            'Sample_ID', 'Gender_Clean', 'Gender', 'State_Clean', 'State', 
+            'Native_Place_Clean', 'Native_Place', 'Region', 'Diplotype', 
+            'Phenotype', 'Activity_Score', 'Test_Requested', 'Date_of_Birth'
+        ]]
 
-    # Map choice to standardized loci
-    if "*2 + *3" in variant_combo_choice:
-        active_snps = ['CYP2C19*2', 'CYP2C19*3']
-        combo_title = "CYP2C19 *2 + *3"
-        std_snps_label = "c.681G>A & c.636G>A"
-        rs_label = "rs4244285 + rs4986893"
-    elif "*2 + *17" in variant_combo_choice:
-        active_snps = ['CYP2C19*2', 'CYP2C19*17']
-        combo_title = "CYP2C19 *2 + *17"
-        std_snps_label = "c.681G>A & c.-806C>T"
-        rs_label = "rs4244285 + rs12248560"
-    elif "*3 + *17" in variant_combo_choice:
-        active_snps = ['CYP2C19*3', 'CYP2C19*17']
-        combo_title = "CYP2C19 *3 + *17"
-        std_snps_label = "c.636G>A & c.-806C>T"
-        rs_label = "rs4986893 + rs12248560"
+    cyp2c19_markers_present = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in processed_df.columns]
+
+    if len(cyp2c19_markers_present) >= 2:
+        st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
+        avail_options = []
+        if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*3' in cyp2c19_markers_present:
+            avail_options.append("CYP2C19 *2 + *3 (c.681G>A / c.636G>A · Loss of Function)")
+        if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
+            avail_options.append("CYP2C19 *2 + *17 (c.681G>A / c.-806C>T · LOF + Increased Function)")
+        if 'CYP2C19*3' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
+            avail_options.append("CYP2C19 *3 + *17 (c.636G>A / c.-806C>T · LOF + Increased Function)")
+        if len(cyp2c19_markers_present) == 3:
+            avail_options.append("CYP2C19 Core Panel (*2 + *3 + *17 · Full 3-Locus Trio)")
+        if not avail_options:
+            avail_options = [f"CYP2C19 Panel ({' + '.join(cyp2c19_markers_present)})"]
+
+        variant_combo_choice = st.radio(
+            "Variant Combination:",
+            avail_options,
+            horizontal=True,
+            key="studio_variant_combo_choice",
+            label_visibility="collapsed"
+        )
+        if "*2 + *3" in variant_combo_choice:
+            active_snps = ['CYP2C19*2', 'CYP2C19*3']
+            combo_title = "CYP2C19 *2 + *3"
+            std_snps_label = "c.681G>A & c.636G>A"
+            rs_label = "rs4244285 + rs4986893"
+        elif "*2 + *17" in variant_combo_choice:
+            active_snps = ['CYP2C19*2', 'CYP2C19*17']
+            combo_title = "CYP2C19 *2 + *17"
+            std_snps_label = "c.681G>A & c.-806C>T"
+            rs_label = "rs4244285 + rs12248560"
+        elif "*3 + *17" in variant_combo_choice:
+            active_snps = ['CYP2C19*3', 'CYP2C19*17']
+            combo_title = "CYP2C19 *3 + *17"
+            std_snps_label = "c.636G>A & c.-806C>T"
+            rs_label = "rs4986893 + rs12248560"
+        elif "Core Panel" in variant_combo_choice:
+            active_snps = ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
+            combo_title = "CYP2C19 *2 + *3 + *17"
+            std_snps_label = "c.681G>A, c.636G>A & c.-806C>T"
+            rs_label = "rs4244285 + rs4986893 + rs12248560"
+        else:
+            active_snps = cyp2c19_markers_present
+            combo_title = " + ".join(active_snps)
+            std_snps_label = f"{len(active_snps)}-Locus Panel"
+            rs_label = combo_title
+    elif len(mapped_snps_in_df) >= 1:
+        active_snps = mapped_snps_in_df
+        combo_title = f"{target_gene} ({' + '.join(active_snps)})"
+        std_snps_label = f"{len(active_snps)}-Marker Panel"
+        rs_label = combo_title
+        st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin-bottom: 6px;'>1️⃣ Analyzed Multi-Locus Panel: <b>{combo_title}</b></div>", unsafe_allow_html=True)
     else:
-        active_snps = ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
-        combo_title = "CYP2C19 *2 + *3 + *17"
-        std_snps_label = "c.681G>A, c.636G>A & c.-806C>T"
-        rs_label = "rs4244285 + rs4986893 + rs12248560"
+        st.info("ℹ️ Multi-Locus Combination Studio requires at least one mapped marker column with valid genotype calls.")
+        return
 
     active_snps = [c for c in active_snps if c in processed_df.columns]
+    if not active_snps:
+        st.info("ℹ️ No valid marker columns found in the active dataset to build a combination studio matrix.")
+        return
+
     state_col = 'State_Clean' if 'State_Clean' in processed_df.columns else ('State' if 'State' in processed_df.columns else None)
 
     # -------------------------------------------------------------------------
@@ -924,26 +958,32 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     combo_grp['pct_val'] = combo_grp['Sample Count (N)'].apply(lambda x: round(x / tot_cohort * 100, 1) if tot_cohort > 0 else 0.0)
 
     # Add Combination Pattern string
-    if len(active_snps) == 2:
+    if len(active_snps) == 1:
+        combo_grp['Combination Pattern'] = combo_grp[active_snps[0]].astype(str)
+    elif len(active_snps) == 2:
         combo_grp['Combination Pattern'] = combo_grp.apply(lambda r: f"{r[active_snps[0]]} + {r[active_snps[1]]}", axis=1)
     else:
-        combo_grp['Combination Pattern'] = combo_grp.apply(lambda r: f"{r[active_snps[0]]} + {r[active_snps[1]]} + {r[active_snps[2]]}", axis=1)
+        combo_grp['Combination Pattern'] = combo_grp.apply(lambda r: " + ".join([str(r[c]) for c in active_snps]), axis=1)
 
     # Associated Diplotypes and Phenotypes for each combination in active_df
     def get_associated_dips(row):
+        if 'Diplotype' not in active_df.columns:
+            return "N/A"
         cond = True
         for col in active_snps:
             cond = cond & (active_df[col] == row[col])
         sub = active_df[cond]
-        dips = ", ".join(sorted(sub['Diplotype'].dropna().unique()))
+        dips = ", ".join(sorted([str(d) for d in sub['Diplotype'].dropna().unique()]))
         return dips if dips else "N/A"
 
     def get_associated_phes(row):
+        if 'Phenotype' not in active_df.columns:
+            return "N/A"
         cond = True
         for col in active_snps:
             cond = cond & (active_df[col] == row[col])
         sub = active_df[cond]
-        phes = ", ".join(sorted(sub['Phenotype'].dropna().unique()))
+        phes = ", ".join(sorted([str(p) for p in sub['Phenotype'].dropna().unique()]))
         return phes if phes else "N/A"
 
     combo_grp['Associated Diplotypes'] = combo_grp.apply(get_associated_dips, axis=1)
@@ -2698,6 +2738,113 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             if cat_gene not in detected_gene_matches:
                                 detected_gene_matches.append(cat_gene)
 
+                # Define callbacks to update widget session state safely before widgets instantiate
+                def cb_switch_target_gene(new_g, new_markers):
+                    st.session_state['selected_gene'] = new_g
+                    st.session_state['selected_markers'] = new_markers[:3] if new_markers else [f"{new_g}_marker1"]
+                    for k in list(st.session_state.keys()):
+                        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
+                            del st.session_state[k]
+
+                def cb_set_preset(p_k, p_val, r_k, v_k, r_val, v_val, sel_r_k, sel_v_k):
+                    st.session_state[p_k] = p_val
+                    st.session_state[r_k] = r_val
+                    st.session_state[v_k] = v_val
+                    if sel_r_k:
+                        st.session_state[sel_r_k] = r_val if r_val in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
+                        if r_val not in ['A', 'C', 'G', 'T']:
+                            idx_str = sel_r_k.split('_')[-1]
+                            st.session_state[f"custom_ref_in_{idx_str}"] = r_val
+                    if sel_v_k:
+                        st.session_state[sel_v_k] = v_val if v_val in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
+                        if v_val not in ['A', 'C', 'G', 'T', 'None']:
+                            idx_str = sel_v_k.split('_')[-1]
+                            st.session_state[f"custom_var_in_{idx_str}"] = v_val
+
+                def cb_automap_detected(p_k, calls_list, r_k, v_k, sel_r_k, sel_v_k):
+                    st.session_state[p_k] = ", ".join(calls_list)
+                    r_c, v_c = extract_alleles_from_calls(calls_list)
+                    if r_c:
+                        st.session_state[r_k] = r_c
+                        if sel_r_k:
+                            st.session_state[sel_r_k] = r_c if r_c in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
+                            if r_c not in ['A', 'C', 'G', 'T']:
+                                idx_str = sel_r_k.split('_')[-1]
+                                st.session_state[f"custom_ref_in_{idx_str}"] = r_c
+                    if v_c:
+                        st.session_state[v_k] = v_c
+                        if sel_v_k:
+                            st.session_state[sel_v_k] = v_c if v_c in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
+                            if v_c not in ['A', 'C', 'G', 'T', 'None']:
+                                idx_str = sel_v_k.split('_')[-1]
+                                st.session_state[f"custom_var_in_{idx_str}"] = v_c
+
+                def cb_add_unmapped(p_k, unexp_list, r_k, v_k, sel_r_k, sel_v_k):
+                    cur_p = str(st.session_state.get(p_k, "")).strip()
+                    add_str = ", ".join(unexp_list)
+                    if cur_p:
+                        if not cur_p.endswith(','):
+                            cur_p += ", "
+                        new_p = cur_p + add_str
+                    else:
+                        new_p = add_str
+                    st.session_state[p_k] = new_p
+                    all_c = [g.strip().upper() for g in new_p.split(',') if g.strip()]
+                    r_c, v_c = extract_alleles_from_calls(all_c)
+                    if r_c:
+                        st.session_state[r_k] = r_c
+                        if sel_r_k:
+                            st.session_state[sel_r_k] = r_c if r_c in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
+                            if r_c not in ['A', 'C', 'G', 'T']:
+                                idx_str = sel_r_k.split('_')[-1]
+                                st.session_state[f"custom_ref_in_{idx_str}"] = r_c
+                    if v_c:
+                        st.session_state[v_k] = v_c
+                        if sel_v_k:
+                            st.session_state[sel_v_k] = v_c if v_c in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
+                            if v_c not in ['A', 'C', 'G', 'T', 'None']:
+                                idx_str = sel_v_k.split('_')[-1]
+                                st.session_state[f"custom_var_in_{idx_str}"] = v_c
+
+                def cb_align_alleles(r_k, v_k, r_c, v_c, sel_r_k, sel_v_k):
+                    st.session_state[r_k] = r_c
+                    st.session_state[v_k] = v_c
+                    if sel_r_k:
+                        st.session_state[sel_r_k] = r_c if r_c in ['A', 'C', 'G', 'T'] else 'Other (Manual)'
+                        if r_c not in ['A', 'C', 'G', 'T']:
+                            idx_str = sel_r_k.split('_')[-1]
+                            st.session_state[f"custom_ref_in_{idx_str}"] = r_c
+                    if sel_v_k:
+                        st.session_state[sel_v_k] = v_c if v_c in ['A', 'C', 'G', 'T', 'None'] else 'Other (Manual)'
+                        if v_c not in ['A', 'C', 'G', 'T', 'None']:
+                            idx_str = sel_v_k.split('_')[-1]
+                            st.session_state[f"custom_var_in_{idx_str}"] = v_c
+
+                def cb_extra_automap(p_k, r_k, v_k, calls_list):
+                    st.session_state[p_k] = ", ".join(calls_list)
+                    r_c, v_c = extract_alleles_from_calls(calls_list)
+                    if r_c:
+                        st.session_state[r_k] = r_c
+                    if v_c:
+                        st.session_state[v_k] = v_c
+
+                def cb_extra_add_unmapped(p_k, unexp_list, r_k, v_k):
+                    cur_p = str(st.session_state.get(p_k, "")).strip()
+                    add_str = ", ".join(unexp_list)
+                    if cur_p:
+                        if not cur_p.endswith(','):
+                            cur_p += ", "
+                        new_p = cur_p + add_str
+                    else:
+                        new_p = add_str
+                    st.session_state[p_k] = new_p
+                    all_c = [g.strip().upper() for g in new_p.split(',') if g.strip()]
+                    r_c, v_c = extract_alleles_from_calls(all_c)
+                    if r_c:
+                        st.session_state[r_k] = r_c
+                    if v_c:
+                        st.session_state[v_k] = v_c
+
                 if detected_gene_matches:
                     for sg in detected_gene_matches:
                         sg_markers = catalog_df[catalog_df['Gene'] == sg]['Marker'].tolist() if not catalog_df.empty else []
@@ -2706,10 +2853,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.info(f"💡 **Smart Detection:** Your uploaded spreadsheet appears to contain columns for **{sg}**. Would you like to switch your active target gene to **{sg}**?")
                         with c_sg2:
                             st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-                            if st.button(f"👉 Switch to {sg}", key=f"btn_switch_to_{sg}"):
-                                st.session_state['selected_gene'] = sg
-                                st.session_state['selected_markers'] = sg_markers[:3] if sg_markers else [f"{sg}_marker1"]
-                                st.rerun()
+                            st.button(f"👉 Switch to {sg}", key=f"btn_switch_to_{sg}", on_click=cb_switch_target_gene, args=(sg, sg_markers))
 
                 c_opt_filter, c_mode_sel = st.columns([0.45, 0.55])
                 with c_opt_filter:
@@ -2809,17 +2953,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         def_col_idx = col_options.index(st.session_state[col_key]) if st.session_state[col_key] in col_options else 0
                         sel_col = st.session_state[col_key]
 
-                        ref_key = f"w_map_ref_{idx}"
-                        var_key = f"w_map_var_{idx}"
-                        perm_key = f"w_map_perm_{idx}"
-
-                        if ref_key not in st.session_state:
-                            st.session_state[ref_key] = def_ref
-                        if var_key not in st.session_state:
-                            st.session_state[var_key] = def_var
-                        if perm_key not in st.session_state:
-                            st.session_state[perm_key] = def_permitted
-
                         # Live Data Inspection for this column
                         observed_counts = {}
                         detected_calls_list = []
@@ -2830,6 +2963,26 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
                             observed_counts = dict(norm_calls.value_counts())
                             detected_calls_list = list(observed_counts.keys())
+
+                        ref_key = f"w_map_ref_{idx}"
+                        var_key = f"w_map_var_{idx}"
+                        perm_key = f"w_map_perm_{idx}"
+
+                        # SMART AUTO-DEFAULT: If detected calls have zero overlap with default permitted genotypes,
+                        # automatically adapt def_permitted, def_ref, def_var to the detected calls
+                        def_perm_tokens = [x.strip().upper() for x in def_permitted.split(',') if x.strip()]
+                        if detected_calls_list and not any(c in def_perm_tokens for c in detected_calls_list):
+                            def_permitted = ", ".join(detected_calls_list)
+                            auto_r, auto_v = extract_alleles_from_calls(detected_calls_list)
+                            if auto_r: def_ref = auto_r
+                            if auto_v: def_var = auto_v
+
+                        if ref_key not in st.session_state:
+                            st.session_state[ref_key] = def_ref
+                        if var_key not in st.session_state:
+                            st.session_state[var_key] = def_var
+                        if perm_key not in st.session_state:
+                            st.session_state[perm_key] = def_permitted
 
                         st.markdown(f"""
                         <div class="clean-card-box" style="margin-bottom: 10px; border-left: 4px solid #3B82F6;">
@@ -2866,12 +3019,13 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 st.markdown("<div style='font-size: 11px; font-weight: 700; color: #64748B; margin-bottom: 4px; text-transform: uppercase;'>Detected Calls in Dataset:</div>", unsafe_allow_html=True)
                                 pill_html = " ".join([f"<span style='background:#F1F5F9; color:#0F172A; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #CBD5E1;'>{c} ({observed_counts[c]})</span>" for c in detected_calls_list])
                                 st.markdown(pill_html, unsafe_allow_html=True)
-                                if st.button(f"⚡ Auto-Map Detected Calls ({', '.join(detected_calls_list)})", key=f"btn_automap_detected_{idx}", help="Click to set permitted genotypes and auto-align Reference/Variant alleles"):
-                                    st.session_state[perm_key] = ', '.join(detected_calls_list)
-                                    r_auto, v_auto = extract_alleles_from_calls(detected_calls_list)
-                                    st.session_state[ref_key] = r_auto
-                                    st.session_state[var_key] = v_auto
-                                    st.rerun()
+                                st.button(
+                                    f"⚡ Auto-Map Detected Calls ({', '.join(detected_calls_list)})",
+                                    key=f"btn_automap_detected_{idx}",
+                                    on_click=cb_automap_detected,
+                                    args=(perm_key, detected_calls_list, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"),
+                                    help="Click to set permitted genotypes and auto-align Reference/Variant alleles"
+                                )
 
                         c2_m, c3_m = st.columns(2)
                         with c2_m:
@@ -2912,26 +3066,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             # Quick Preset Buttons
                             st.caption("Quick Preset Combinations:")
                             c_p1, c_p2, c_p3, c_p4 = st.columns(4)
-                            if c_p1.button("CC, CT, TT", key=f"btn_p_cctt_{idx}", use_container_width=True):
-                                st.session_state[perm_key] = "CC, CT, TT"
-                                st.session_state[ref_key] = "C"
-                                st.session_state[var_key] = "T"
-                                st.rerun()
-                            if c_p2.button("GA, GG, AG", key=f"btn_p_gaag_{idx}", use_container_width=True):
-                                st.session_state[perm_key] = "GA, GG, AG"
-                                st.session_state[ref_key] = "G"
-                                st.session_state[var_key] = "A"
-                                st.rerun()
-                            if c_p3.button("AA, AC, CC", key=f"btn_p_aacc_{idx}", use_container_width=True):
-                                st.session_state[perm_key] = "AA, AC, CC"
-                                st.session_state[ref_key] = "A"
-                                st.session_state[var_key] = "C"
-                                st.rerun()
-                            if c_p4.button("GA, GG, AA", key=f"btn_p_ggaa_{idx}", use_container_width=True):
-                                st.session_state[perm_key] = "GA, GG, AA"
-                                st.session_state[ref_key] = "G"
-                                st.session_state[var_key] = "A"
-                                st.rerun()
+                            c_p1.button("CC, CT, TT", key=f"btn_p_cctt_{idx}", use_container_width=True,
+                                        on_click=cb_set_preset, args=(perm_key, "CC, CT, TT", ref_key, var_key, "C", "T", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
+                            c_p2.button("GA, GG, AG", key=f"btn_p_gaag_{idx}", use_container_width=True,
+                                        on_click=cb_set_preset, args=(perm_key, "GA, GG, AG", ref_key, var_key, "G", "A", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
+                            c_p3.button("AA, AC, CC", key=f"btn_p_aacc_{idx}", use_container_width=True,
+                                        on_click=cb_set_preset, args=(perm_key, "AA, AC, CC", ref_key, var_key, "A", "C", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
+                            c_p4.button("GA, GG, AA", key=f"btn_p_ggaa_{idx}", use_container_width=True,
+                                        on_click=cb_set_preset, args=(perm_key, "GA, GG, AA", ref_key, var_key, "G", "A", f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}"))
 
                         with c_perm_info:
                             hom_ref_str = f"{ref_val}{ref_val}" if ref_val else "N/A"
@@ -2982,13 +3124,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 if unexpected:
                                     st.warning(f"⚠️ Detected unmapped calls: `{unexpected}` ({sum(observed_counts[u] for u in unexpected)} sample(s)) not in your Permitted Genotypes (`{', '.join(raw_perm_list)}`).")
                                     unexp_str = ", ".join(unexpected)
-                                    if st.button(f"➕ Add `{unexp_str}` to Permitted Genotypes", key=f"btn_add_unexp_{idx}"):
-                                        new_perm = perm_val.strip()
-                                        if new_perm and not new_perm.endswith(','):
-                                            new_perm += ", "
-                                        new_perm += unexp_str
-                                        st.session_state[perm_key] = new_perm
-                                        st.rerun()
+                                    st.button(
+                                        f"➕ Add `{unexp_str}` to Permitted Genotypes",
+                                        key=f"btn_add_unexp_{idx}",
+                                        on_click=cb_add_unmapped,
+                                        args=(perm_key, unexpected, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                    )
                                 else:
                                     st.success(f"✅ **All {tot_samples_col:,} samples verified!** Observed calls match permitted combinations (`{', '.join(raw_perm_list)}`).")
 
@@ -2996,10 +3137,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 gt_ref_cand, gt_var_cand = extract_alleles_from_calls(raw_perm_list)
                                 if (ref_val != gt_ref_cand or (var_val != gt_var_cand and gt_var_cand != 'None')) and gt_ref_cand:
                                     st.info(f"💡 Genotypes suggest Ref = **{gt_ref_cand}**, Var = **{gt_var_cand}**.")
-                                    if st.button(f"👉 Align Alleles to Ref: {gt_ref_cand}, Var: {gt_var_cand}", key=f"btn_align_alleles_{idx}"):
-                                        st.session_state[ref_key] = gt_ref_cand
-                                        st.session_state[var_key] = gt_var_cand
-                                        st.rerun()
+                                    st.button(
+                                        f"👉 Align Alleles to Ref: {gt_ref_cand}, Var: {gt_var_cand}",
+                                        key=f"btn_align_alleles_{idx}",
+                                        on_click=cb_align_alleles,
+                                        args=(ref_key, var_key, gt_ref_cand, gt_var_cand, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                    )
 
                         v_al_stored = 'A' if var_val == 'None' else var_val.strip().upper()
                         mapped_marker_dict[sel_col] = {
@@ -3064,12 +3207,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 row_item['permitted'] = c_perm
 
                                 if ex_detected_list:
-                                    if st.button(f"⚡ Map Detected Calls ({', '.join(ex_detected_list)})", key=f"btn_automap_ex_{r_id}"):
-                                        row_item['permitted'] = ', '.join(ex_detected_list)
-                                        r_cand, v_cand = extract_alleles_from_calls(ex_detected_list)
-                                        row_item['ref_allele'] = r_cand
-                                        row_item['var_allele'] = v_cand
-                                        st.rerun()
+                                    st.button(
+                                        f"⚡ Map Detected Calls ({', '.join(ex_detected_list)})",
+                                        key=f"btn_automap_ex_{r_id}",
+                                        on_click=cb_extra_automap,
+                                        args=(f"ex_perm_{r_id}", f"ex_ref_{r_id}", f"ex_var_{r_id}", ex_detected_list)
+                                    )
 
                             with c_p_desc:
                                 st.markdown(f"""
@@ -3101,9 +3244,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                                 if c_unexp:
                                     st.warning(f"⚠️ Detected unmapped calls: `{c_unexp}`.")
-                                    if st.button(f"➕ Add `{', '.join(c_unexp)}` to Permitted List", key=f"btn_add_unexp_ex_{r_id}"):
-                                        row_item['permitted'] = c_perm + ", " + ", ".join(c_unexp)
-                                        st.rerun()
+                                    st.button(
+                                        f"➕ Add `{', '.join(c_unexp)}` to Permitted List",
+                                        key=f"btn_add_unexp_ex_{r_id}",
+                                        on_click=cb_extra_add_unmapped,
+                                        args=(f"ex_perm_{r_id}", c_unexp, f"ex_ref_{r_id}", f"ex_var_{r_id}")
+                                    )
                                 else:
                                     st.success(f"✅ All {len(ex_norm):,} samples verified for `{c_name}`.")
 
@@ -3325,11 +3471,24 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             final_mapping[m_col] = m_info['std_name']
                             perm_list = m_info.get('permitted_genotypes', [])
                             if perm_list:
-                                clean_perms = tuple(sorted(set(g.replace('/', '').replace('|', '').replace(' ', '') for g in perm_list if g.strip())))
+                                clean_perms = set(g.replace('/', '').replace('|', '').replace(' ', '') for g in perm_list if g.strip())
+                                augmented_p = set(clean_perms)
+                                for g in clean_perms:
+                                    if len(g) == 2:
+                                        augmented_p.add(g[1] + g[0])
                                 custom_rules_for_qc[m_info['std_name']] = {
                                     'ref_allele': m_info['ref_allele'],
                                     'var_allele': m_info['var_allele'],
-                                    'valid_genotypes': clean_perms
+                                    'valid_genotypes': tuple(sorted(augmented_p))
+                                }
+                            else:
+                                r_a = m_info['ref_allele']
+                                v_a = m_info['var_allele']
+                                dyn_perms = {r_a + r_a, r_a + v_a, v_a + r_a, v_a + v_a}
+                                custom_rules_for_qc[m_info['std_name']] = {
+                                    'ref_allele': r_a,
+                                    'var_allele': v_a,
+                                    'valid_genotypes': tuple(sorted(dyn_perms))
                                 }
 
                         st.session_state['mapped_cols'] = final_mapping
