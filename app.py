@@ -646,6 +646,21 @@ def has_active_data() -> bool:
         return False
     return full_results['overall'].get('sample_count', 0) > 0
 
+@st.cache_data(show_spinner=False)
+def get_df_download_excel(df: pd.DataFrame) -> bytes:
+    if df is None or df.empty:
+        return b""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, sheet_name='Complete Dataset', index=False)
+    return output.getvalue()
+
+@st.cache_data(show_spinner=False)
+def get_df_download_csv(df: pd.DataFrame) -> bytes:
+    if df is None or df.empty:
+        return b""
+    return df.to_csv(index=False).encode('utf-8')
+
 # -----------------------------------------------------------------------------
 # 3. SIDEBAR NAVIGATION MENU (WITH ACTIVE WORKFLOW & STATUS)
 # -----------------------------------------------------------------------------
@@ -656,7 +671,7 @@ with st.sidebar:
     
     st.divider()
 
-    # Workspace Controls (Reset / Delete)
+    # Workspace Controls (Reset / Delete / Download)
     st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>⚙️ Workspace Actions</div>", unsafe_allow_html=True)
     if st.session_state.get('show_delete_confirm', False):
         st.warning("⚠️ **Delete Active Dataset?**\nResets workspace to 0 samples.")
@@ -674,6 +689,28 @@ with st.sidebar:
         if st.button("🗑️ Delete Active Dataset", type="secondary", use_container_width=True, key="btn_sb_init_del"):
             st.session_state['show_delete_confirm'] = True
             st.rerun()
+
+    if df_raw is not None and not df_raw.empty:
+        st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-top: 14px; margin-bottom: 6px;'>📥 Download Complete Dataset</div>", unsafe_allow_html=True)
+        c_sb_dl1, c_sb_dl2 = st.columns(2)
+        with c_sb_dl1:
+            st.download_button(
+                label="⬇️ Excel (.xlsx)",
+                data=get_df_download_excel(df_raw),
+                file_name="Complete_PGx_Dataset.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="btn_sb_download_xlsx"
+            )
+        with c_sb_dl2:
+            st.download_button(
+                label="⬇️ CSV (.csv)",
+                data=get_df_download_csv(df_raw),
+                file_name="Complete_PGx_Dataset.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="btn_sb_download_csv"
+            )
 
 # -----------------------------------------------------------------------------
 # CYP2C19 COMBINATION & GEOGRAPHIC STUDIO (DOWNSIDE OF TAB 5)
@@ -2032,15 +2069,24 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
             # Display active workspace status if data is loaded
             if has_active_data():
-                c_status, c_act1, c_act2 = st.columns([1.4, 0.8, 0.8])
+                c_status, c_act1, c_down_top, c_act2 = st.columns([1.1, 0.7, 0.7, 0.5])
                 with c_status:
                     st.info(f"📂 **Active Workspace Data:** `{len(df_raw):,} samples` loaded.")
                 with c_act1:
-                    if st.button("📊 View Current Results →", use_container_width=True, key="btn_step1_quick_res"):
+                    if st.button("📊 View Results →", use_container_width=True, key="btn_step1_quick_res"):
                         st.session_state['workflow_step'] = '4 · Results'
                         st.rerun()
+                with c_down_top:
+                    st.download_button(
+                        label="⬇️ Download (.xlsx)",
+                        data=get_df_download_excel(df_raw),
+                        file_name=f"complete_dataset_{len(df_raw)}_samples.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="btn_step2_top_download"
+                    )
                 with c_act2:
-                    if st.button("🗑️ Delete & Clear Data", use_container_width=True, key="btn_step1_quick_del"):
+                    if st.button("🗑️ Delete", use_container_width=True, key="btn_step1_quick_del"):
                         reset_all_data()
                         st.rerun()
 
@@ -2211,10 +2257,30 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     for log_entry in st.session_state['merge_alignment_log']:
                         st.markdown(f"• {log_entry}")
 
-            # Show active dataset preview if loaded
+            # Show active dataset preview and download options if loaded
             if has_active_data():
-                st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
-                st.markdown(f"##### 📋 Active Dataset Preview ({len(df_raw):,} samples, {len(df_raw.columns)} columns):")
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+                c_prev_head, c_dl_xl, c_dl_csv = st.columns([1.2, 0.9, 0.9])
+                with c_prev_head:
+                    st.markdown(f"##### 📋 Active Dataset Preview ({len(df_raw):,} samples, {len(df_raw.columns)} columns):")
+                with c_dl_xl:
+                    st.download_button(
+                        label="⬇️ Download Complete Data (.xlsx)",
+                        data=get_df_download_excel(df_raw),
+                        file_name=f"complete_pgx_dataset_{len(df_raw)}_samples.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="btn_step2_prev_download_xlsx"
+                    )
+                with c_dl_csv:
+                    st.download_button(
+                        label="⬇️ Download Complete Data (.csv)",
+                        data=get_df_download_csv(df_raw),
+                        file_name=f"complete_pgx_dataset_{len(df_raw)}_samples.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="btn_step2_prev_download_csv"
+                    )
                 st.dataframe(df_raw.head(5), use_container_width=True)
 
             st.markdown("""
@@ -2702,6 +2768,30 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 if st.button("← Re-map columns", use_container_width=True, key="btn_res_remap"):
                     st.session_state['workflow_step'] = '3 · Map columns'
                     st.rerun()
+
+            if df_raw is not None and not df_raw.empty:
+                st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                target_full_df = processed_df if (processed_df is not None and not processed_df.empty) else df_raw
+                c_full_dl1, c_full_dl2 = st.columns(2)
+                with c_full_dl1:
+                    label_desc = "⬇️ Download Complete Classified Dataset (.xlsx)" if (processed_df is not None and not processed_df.empty) else "⬇️ Download Complete Dataset (.xlsx)"
+                    st.download_button(
+                        label=label_desc,
+                        data=get_df_download_excel(target_full_df),
+                        file_name=f"complete_pgx_dataset_{len(target_full_df)}_samples.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="btn_res_full_dl_xlsx"
+                    )
+                with c_full_dl2:
+                    st.download_button(
+                        label="⬇️ Download Complete Dataset (.csv)",
+                        data=get_df_download_csv(target_full_df),
+                        file_name=f"complete_pgx_dataset_{len(target_full_df)}_samples.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="btn_res_full_dl_csv"
+                    )
 
             st.markdown("""
             <div class="footer-disclaimer-text">
