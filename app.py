@@ -867,88 +867,102 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             'Phenotype', 'Activity_Score', 'Test_Requested', 'Date_of_Birth'
         ]]
 
+    target_gene_upper = str(target_gene).strip().upper() if target_gene else ""
     cyp2c19_markers_present = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in processed_df.columns]
     cyp2c9_markers_present = [c for c in ['CYP2C9*2', 'CYP2C9*3'] if c in processed_df.columns]
 
-    if ('CYP2C9' in str(target_gene).upper() or not cyp2c19_markers_present) and len(cyp2c9_markers_present) >= 2:
-        st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
-        avail_options = ["CYP2C9 *2 + *3 (c.430C>T / c.1075A>C · Decreased Function Panel)"]
-        variant_combo_choice = st.radio(
-            "Variant Combination:",
-            avail_options,
-            horizontal=True,
-            key="studio_variant_combo_choice_cyp2c9",
-            label_visibility="collapsed"
-        )
-        active_snps = ['CYP2C9*2', 'CYP2C9*3']
-        combo_title = "CYP2C9 *2 + *3"
-        std_snps_label = "c.430C>T & c.1075A>C"
-        rs_label = "rs1799853 + rs1057910"
-    elif len(cyp2c19_markers_present) >= 2:
-        st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
-        avail_options = []
-        if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*3' in cyp2c19_markers_present:
-            avail_options.append("CYP2C19 *2 + *3 (c.681G>A / c.636G>A · Loss of Function)")
-        if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
-            avail_options.append("CYP2C19 *2 + *17 (c.681G>A / c.-806C>T · LOF + Increased Function)")
-        if 'CYP2C19*3' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
-            avail_options.append("CYP2C19 *3 + *17 (c.636G>A / c.-806C>T · LOF + Increased Function)")
-        if len(cyp2c19_markers_present) == 3:
-            avail_options.append("CYP2C19 Core Panel (*2 + *3 + *17 · Full 3-Locus Trio)")
-        if not avail_options:
-            avail_options = [f"CYP2C19 Panel ({' + '.join(cyp2c19_markers_present)})"]
-
-        variant_combo_choice = st.radio(
-            "Variant Combination:",
-            avail_options,
-            horizontal=True,
-            key="studio_variant_combo_choice",
-            label_visibility="collapsed"
-        )
-        if "*2 + *3" in variant_combo_choice:
-            active_snps = ['CYP2C19*2', 'CYP2C19*3']
-            combo_title = "CYP2C19 *2 + *3"
-            std_snps_label = "c.681G>A & c.636G>A"
-            rs_label = "rs4244285 + rs4986893"
-        elif "*2 + *17" in variant_combo_choice:
-            active_snps = ['CYP2C19*2', 'CYP2C19*17']
-            combo_title = "CYP2C19 *2 + *17"
-            std_snps_label = "c.681G>A & c.-806C>T"
-            rs_label = "rs4244285 + rs12248560"
-        elif "*3 + *17" in variant_combo_choice:
-            active_snps = ['CYP2C19*3', 'CYP2C19*17']
-            combo_title = "CYP2C19 *3 + *17"
-            std_snps_label = "c.636G>A & c.-806C>T"
-            rs_label = "rs4986893 + rs12248560"
-        elif "Core Panel" in variant_combo_choice:
-            active_snps = ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
-            combo_title = "CYP2C19 *2 + *3 + *17"
-            std_snps_label = "c.681G>A, c.636G>A & c.-806C>T"
-            rs_label = "rs4244285 + rs4986893 + rs12248560"
-        else:
-            active_snps = cyp2c19_markers_present
-            combo_title = " + ".join(active_snps)
-            std_snps_label = f"{len(active_snps)}-Locus Panel"
+    if 'CYP2C9' in target_gene_upper:
+        if len(cyp2c9_markers_present) >= 2:
+            st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
+            avail_options = ["CYP2C9 *2 + *3 (c.430C>T / c.1075A>C · Decreased Function Panel)"]
+            variant_combo_choice = st.radio(
+                "Variant Combination:",
+                avail_options,
+                horizontal=True,
+                key="studio_variant_combo_choice_cyp2c9",
+                label_visibility="collapsed"
+            )
+            active_snps = ['CYP2C9*2', 'CYP2C9*3']
+            combo_title = "CYP2C9 *2 + *3"
+            std_snps_label = "c.430C>T & c.1075A>C"
+            rs_label = "rs1799853 + rs1057910"
+        elif len(cyp2c9_markers_present) == 1:
+            active_snps = cyp2c9_markers_present
+            combo_title = cyp2c9_markers_present[0]
+            std_snps_label = "Single-Marker Analysis"
             rs_label = combo_title
-    elif len(cyp2c9_markers_present) >= 2:
-        st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
-        avail_options = ["CYP2C9 *2 + *3 (c.430C>T / c.1075A>C · Decreased Function Panel)"]
-        variant_combo_choice = st.radio(
-            "Variant Combination:",
-            avail_options,
-            horizontal=True,
-            key="studio_variant_combo_choice_cyp2c9",
-            label_visibility="collapsed"
-        )
-        active_snps = ['CYP2C9*2', 'CYP2C9*3']
-        combo_title = "CYP2C9 *2 + *3"
-        std_snps_label = "c.430C>T & c.1075A>C"
-        rs_label = "rs1799853 + rs1057910"
+        else:
+            active_snps = mapped_snps_in_df
+            combo_title = f"{target_gene} ({' + '.join(active_snps)})" if active_snps else target_gene
+            std_snps_label = f"{len(active_snps)}-Marker Panel"
+            rs_label = combo_title
+    elif 'CYP2C19' in target_gene_upper:
+        if len(cyp2c19_markers_present) >= 2:
+            st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
+            avail_options = []
+            if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*3' in cyp2c19_markers_present:
+                avail_options.append("CYP2C19 *2 + *3 (c.681G>A / c.636G>A · Loss of Function)")
+            if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
+                avail_options.append("CYP2C19 *2 + *17 (c.681G>A / c.-806C>T · LOF + Increased Function)")
+            if 'CYP2C19*3' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
+                avail_options.append("CYP2C19 *3 + *17 (c.636G>A / c.-806C>T · LOF + Increased Function)")
+            if len(cyp2c19_markers_present) == 3:
+                avail_options.append("CYP2C19 Core Panel (*2 + *3 + *17 · Full 3-Locus Trio)")
+            if not avail_options:
+                avail_options = [f"CYP2C19 Panel ({' + '.join(cyp2c19_markers_present)})"]
+
+            variant_combo_choice = st.radio(
+                "Variant Combination:",
+                avail_options,
+                horizontal=True,
+                key="studio_variant_combo_choice",
+                label_visibility="collapsed"
+            )
+            if "*2 + *3 + *17" in variant_combo_choice or "Core Panel" in variant_combo_choice:
+                active_snps = ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
+                combo_title = "CYP2C19 *2 + *3 + *17"
+                std_snps_label = "c.681G>A, c.636G>A & c.-806C>T"
+                rs_label = "rs4244285 + rs4986893 + rs12248560"
+            elif "*2 + *3" in variant_combo_choice:
+                active_snps = ['CYP2C19*2', 'CYP2C19*3']
+                combo_title = "CYP2C19 *2 + *3"
+                std_snps_label = "c.681G>A & c.636G>A"
+                rs_label = "rs4244285 + rs4986893"
+            elif "*2 + *17" in variant_combo_choice:
+                active_snps = ['CYP2C19*2', 'CYP2C19*17']
+                combo_title = "CYP2C19 *2 + *17"
+                std_snps_label = "c.681G>A & c.-806C>T"
+                rs_label = "rs4244285 + rs12248560"
+            elif "*3 + *17" in variant_combo_choice:
+                active_snps = ['CYP2C19*3', 'CYP2C19*17']
+                combo_title = "CYP2C19 *3 + *17"
+                std_snps_label = "c.636G>A & c.-806C>T"
+                rs_label = "rs4986893 + rs12248560"
+            else:
+                active_snps = cyp2c19_markers_present
+                combo_title = " + ".join(active_snps)
+                std_snps_label = f"{len(active_snps)}-Locus Panel"
+                rs_label = combo_title
+        elif len(cyp2c19_markers_present) == 1:
+            active_snps = cyp2c19_markers_present
+            combo_title = cyp2c19_markers_present[0]
+            std_snps_label = "Single-Marker Analysis"
+            rs_label = combo_title
+        else:
+            active_snps = mapped_snps_in_df
+            combo_title = f"{target_gene} ({' + '.join(active_snps)})" if active_snps else target_gene
+            std_snps_label = f"{len(active_snps)}-Marker Panel"
+            rs_label = combo_title
     elif len(mapped_snps_in_df) >= 1:
         active_snps = mapped_snps_in_df
-        combo_title = f"{target_gene} ({' + '.join(active_snps)})"
-        std_snps_label = f"{len(active_snps)}-Marker Panel"
-        rs_label = combo_title
+        if len(active_snps) == 1:
+            combo_title = f"{target_gene} ({active_snps[0]})"
+            std_snps_label = "Single-Marker Analysis"
+            rs_label = active_snps[0]
+        else:
+            combo_title = f"{target_gene} ({' + '.join(active_snps)})"
+            std_snps_label = f"{len(active_snps)}-Marker Panel"
+            rs_label = " + ".join(active_snps)
         st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin-bottom: 6px;'>1️⃣ Analyzed Multi-Locus Panel: <b>{combo_title}</b></div>", unsafe_allow_html=True)
     else:
         st.info("ℹ️ Multi-Locus Combination Studio requires at least one mapped marker column with valid genotype calls.")
@@ -1365,25 +1379,48 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # Helper for Sub-cohort & State-Wise Filter UI
     def render_subcohort_pills(key_prefix):
         st_dict = full_results.get('state_wise', {})
-        pill_options = [f"{k} (n={v.get('sample_count', 0)})" for k, v in cohort_dict.items() if v]
+        reg_dict = full_results.get('regional', {})
         
-        c_pill, c_state = st.columns([1.1, 0.9])
-        with c_pill:
-            selected_pill = st.radio("Select Sub-Cohort Profile:", pill_options, horizontal=True, key=f"{key_prefix}_subcohort_pills")
-        
-        state_items = sorted([(s, data.get('sample_count', 0)) for s, data in st_dict.items() if data.get('sample_count', 0) > 0])
-        state_options = ["(All States / Default)"] + [f"{s} (n={cnt})" for s, cnt in state_items]
-        
-        with c_state:
-            selected_state_str = st.selectbox("🗺️ Select State-Wise Profile Data:", state_options, key=f"{key_prefix}_state_select")
-            
-        if selected_state_str != "(All States / Default)":
-            state_name = selected_state_str.split(" (n=")[0]
-            sel_key = f"State: {state_name}"
-            sel_cohort = st_dict.get(state_name, full_results['overall'])
-        else:
-            sel_key = selected_pill.split(' (')[0]
-            sel_cohort = cohort_dict.get(sel_key, full_results['overall'])
+        c_mode, c_sub = st.columns([1.1, 0.9])
+        with c_mode:
+            filter_mode = st.radio(
+                "Filter Population By:",
+                ["🌐 Overall Cohort", "🗺️ Geographic Region", "📍 Individual State"],
+                horizontal=True,
+                key=f"{key_prefix}_filter_mode"
+            )
+
+        with c_sub:
+            if filter_mode == "🗺️ Geographic Region":
+                reg_names = [r for r in ['South India', 'North India', 'East India', 'West India', 'Central India'] if reg_dict.get(r, {}).get('sample_count', 0) > 0]
+                if not reg_names:
+                    reg_names = list(reg_dict.keys())
+                reg_options = [f"{r} (n={reg_dict.get(r, {}).get('sample_count', 0):,})" for r in reg_names]
+                if reg_options:
+                    selected_reg_str = st.selectbox("Select Geographic Region:", reg_options, key=f"{key_prefix}_sel_region")
+                    r_name = selected_reg_str.split(' (')[0]
+                    sel_key = r_name
+                    sel_cohort = reg_dict.get(r_name, full_results.get('overall', {}))
+                else:
+                    st.info("No regional data available.")
+                    sel_key = "Overall Population"
+                    sel_cohort = full_results.get('overall', {})
+            elif filter_mode == "📍 Individual State":
+                state_items = sorted([(s, data.get('sample_count', 0)) for s, data in st_dict.items() if data.get('sample_count', 0) > 0], key=lambda x: x[1], reverse=True)
+                if state_items:
+                    state_options = [f"{s} (n={cnt:,})" for s, cnt in state_items]
+                    selected_state_str = st.selectbox("Select State Profile:", state_options, key=f"{key_prefix}_sel_state")
+                    s_name = selected_state_str.split(' (')[0]
+                    sel_key = f"State: {s_name}"
+                    sel_cohort = st_dict.get(s_name, full_results.get('overall', {}))
+                else:
+                    st.info("No state data available.")
+                    sel_key = "Overall Population"
+                    sel_cohort = full_results.get('overall', {})
+            else:
+                sel_key = "Overall Population"
+                sel_cohort = full_results.get('overall', {})
+                st.caption(f"Displaying full analyzed cohort (**{sel_cohort.get('sample_count', 0):,}** samples).")
             
         return sel_key, sel_cohort
 
@@ -1633,17 +1670,18 @@ def render_unified_results(full_results: dict, qc_report: dict):
             else:
                 st.info("No Chi-Square data available to plot for this cohort.")
         
-        st.markdown("##### Table 3. Chi-Square Distribution Reference Table (df = 1, α = 0.05, Critical = 3.4)")
-        chi2_ref_df = pd.DataFrame([{
-            'Level of Significance (α)': '0.50',
-            '0.10': '2.706',
-            '0.05 (Critical Threshold)': '3.4',
-            '0.02': '5.412',
-            '0.01': '6.635',
-            '0.001': '10.827'
-        }])
-        st.table(chi2_ref_df)
-        st.info("📌 **HWE Decision Rule:** If $\\chi^2 \\ge 3.4$, population deviates from Hardy-Weinberg Equilibrium.")
+        with st.expander("📖 Standard Chi-Square Distribution Cutoff Reference Table (Theoretical Distribution, df = 1)", expanded=False):
+            st.caption("ℹ️ **Theoretical Reference:** This table provides standard statistical critical values for degrees of freedom $df = 1$. It is a constant mathematical reference benchmark used to evaluate whether your cohort's calculated $\chi^2$ value above indicates Hardy-Weinberg deviation ($\chi^2 \ge 3.4$). It does not change with cohort data.")
+            chi2_ref_df = pd.DataFrame([{
+                'Level of Significance (α)': '0.50',
+                '0.10': '2.706',
+                '0.05 (Critical Threshold)': '3.4',
+                '0.02': '5.412',
+                '0.01': '6.635',
+                '0.001': '10.827'
+            }])
+            st.table(chi2_ref_df)
+            st.info("📌 **HWE Decision Rule:** If observed $\\chi^2 \\ge 3.4$ (or $P < 0.05$), the cohort significantly deviates from Hardy-Weinberg Equilibrium.")
 
     # -------------------------------------------------------------------------
     # TAB 4: POPULATION STRATIFICATION
@@ -2178,10 +2216,10 @@ def render_unified_results(full_results: dict, qc_report: dict):
             pm_pct = pgx_st.get('phenotypes', {}).get('Poor Metabolizer', pgx_st.get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
 
             sk1, sk2, sk3, sk4 = st.columns(4)
-            sk1.metric("State Sample N", st_data.get('sample_count', 0))
-            sk2.metric("Missing Data Rate", f"{st_data.get('missing_pct', 0)}%")
-            sk3.metric(f"{primary_marker} Var Freq ({var_al})", marker_freq)
-            sk4.metric("Poor Metabolizers %", f"{pm_pct:.1f}%")
+            sk1.metric("State Cohort Size (N)", f"{st_data.get('sample_count', 0):,} samples", help=f"Total number of patients/samples from {selected_st} present in this cohort")
+            sk2.metric("Missing Data Rate", f"{st_data.get('missing_pct', 0):.1f}%", help=f"Percentage of uncalled / missing genotypes in {selected_st}")
+            sk3.metric(f"{primary_marker} Var Freq ({var_al})", f"{marker_freq:.4f}" if isinstance(marker_freq, (int, float)) else str(marker_freq), help=f"Minor Allele Frequency (MAF) of variant allele {var_al} in {selected_st}")
+            sk4.metric("Poor Metabolizers %", f"{pm_pct:.1f}%", help=f"Percentage of Poor Metabolizer (PM) patients in {selected_st}")
 
             st_phenos = pgx_st.get('phenotypes', {})
             st_snps = st_data.get('snps', {}).get(primary_marker, {}).get('genotype_counts', {})
