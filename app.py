@@ -4181,7 +4181,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         custom_rules_for_qc = {}
                         for m_col, m_info in mapped_marker_dict.items():
                             final_mapping[m_col] = m_info['std_name']
-                            perm_list = m_info.get('permitted_genotypes', [])
+                            r_a = m_info['ref_allele']
+                            v_a = m_info['var_allele']
                             if perm_list:
                                 clean_perms = set(g.replace('/', '').replace('|', '').replace(' ', '') for g in perm_list if g.strip())
                                 augmented_p = set(clean_perms)
@@ -4189,18 +4190,22 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                     if len(g) == 2:
                                         augmented_p.add(g[1] + g[0])
                                 custom_rules_for_qc[m_info['std_name']] = {
-                                    'ref_allele': m_info['ref_allele'],
-                                    'var_allele': m_info['var_allele'],
-                                    'valid_genotypes': tuple(sorted(augmented_p))
+                                    'ref_allele': r_a,
+                                    'var_allele': v_a,
+                                    'valid_genotypes': tuple(sorted(augmented_p)),
+                                    'wildtype_genotype': f"{r_a}{r_a}",
+                                    'het_genotype': f"{r_a}{v_a}",
+                                    'hom_var_genotype': f"{v_a}{v_a}"
                                 }
                             else:
-                                r_a = m_info['ref_allele']
-                                v_a = m_info['var_allele']
                                 dyn_perms = {r_a + r_a, r_a + v_a, v_a + r_a, v_a + v_a}
                                 custom_rules_for_qc[m_info['std_name']] = {
                                     'ref_allele': r_a,
                                     'var_allele': v_a,
-                                    'valid_genotypes': tuple(sorted(dyn_perms))
+                                    'valid_genotypes': tuple(sorted(dyn_perms)),
+                                    'wildtype_genotype': f"{r_a}{r_a}",
+                                    'het_genotype': f"{r_a}{v_a}",
+                                    'hom_var_genotype': f"{v_a}{v_a}"
                                 }
 
                         st.session_state['mapped_cols'] = final_mapping

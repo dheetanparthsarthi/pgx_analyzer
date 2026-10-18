@@ -81,11 +81,18 @@ class GeneticStatsEngine:
                 'hom_var_genotype': f"{var}{var}"
             }
         
-        ref_allele = snp_info['ref_allele']
-        var_allele = snp_info['var_allele']
-        wt_gen = snp_info['wildtype_genotype']
-        het_gen = snp_info['het_genotype']
-        var_gen = snp_info['hom_var_genotype']
+        ref_allele = snp_info.get('ref_allele')
+        var_allele = snp_info.get('var_allele')
+        if not ref_allele or not var_allele:
+            counts = clean_series.value_counts()
+            alleles = set("".join(counts.index.tolist()))
+            alleles = [a for a in alleles if a.isalpha()]
+            ref_allele = ref_allele or (alleles[0] if len(alleles) > 0 else 'A')
+            var_allele = var_allele or (alleles[1] if len(alleles) > 1 else 'G')
+
+        wt_gen = snp_info.get('wildtype_genotype') or f"{ref_allele}{ref_allele}"
+        het_gen = snp_info.get('het_genotype') or f"{ref_allele}{var_allele}"
+        var_gen = snp_info.get('hom_var_genotype') or f"{var_allele}{var_allele}"
         
         if n_valid == 0:
             return {
