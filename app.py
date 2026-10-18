@@ -161,6 +161,23 @@ CUSTOM_CSS = """
         margin-top: 0.3rem;
     }
 
+    /* Prevent Metric Text Truncation */
+    div[data-testid="stMetricValue"] {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+    }
+    div[data-testid="stMetricValue"] > div {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+    }
+    div[data-testid="stMetricDelta"] > div {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+    }
+
     /* Table Clean Border Header Styling matching Screenshots 1, 2, 3 */
     div[data-testid="stTable"] table {
         border-collapse: collapse !important;
@@ -1377,10 +1394,10 @@ def render_unified_results(full_results: dict, qc_report: dict):
         missing_count = qc_report.get('samples_with_missing_count', 0)
         missing_pct = qc_report.get('overall_missing_pct', 0.0)
 
-        k1, k2, k3, k4, k5 = st.columns(5)
+        k1, k2, k3, k4, k5 = st.columns([1, 1, 1.35, 0.9, 1.05])
         k1.metric("TOTAL SAMPLES", f"{tot_samples:,}")
         k2.metric("FULLY VALID", f"{fully_valid:,}")
-        k3.metric("MISSING GENOTYPES", f"{missing_pct:.1f}% ({missing_count} samples)")
+        k3.metric("MISSING GENOTYPES", f"{missing_pct:.1f}%", f"{missing_count:,} samples", delta_color="off")
         k4.metric("DUPLICATE IDS", dup_count)
         k5.metric("INVALID GENOTYPE CALLS", invalid_count)
 
@@ -2041,34 +2058,32 @@ def render_unified_results(full_results: dict, qc_report: dict):
             st.info("No active markers to display.")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(f"#### 💊 State-Wise Metabolizer Phenotype Distribution Matrix ({active_gene})")
-        st.caption(f"Distribution of CPIC {active_gene} Metabolizer Phenotypes across individual states in your cohort.")
+        st.markdown(f"#### 🌐 Geographic Region Metabolizer Phenotype Distribution Matrix ({active_gene})")
+        st.caption(f"Distribution of CPIC {active_gene} Metabolizer Phenotypes across Indian Geographic Population Groups.")
 
         pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
-        st_dict = full_results.get('state_wise', {})
-        state_pheno_matrix = []
-        for s_name, s_data in sorted(st_dict.items(), key=lambda x: x[1].get('sample_count', 0), reverse=True):
-            if s_data.get('sample_count', 0) > 0:
-                p_dict = (s_data.get('pgx_summary') or s_data.get(f"{active_gene.lower()}_summary") or s_data.get('cyp2c19_summary', {})).get('phenotypes', {})
-                row = {'State': s_name, 'Total Sample N': s_data.get('sample_count', 0)}
-                for p_cat in pheno_order:
-                    cnt = p_dict.get(p_cat, {}).get('count', 0)
-                    pct = p_dict.get(p_cat, {}).get('percentage', 0.0)
-                    p_label = p_cat.split(' (')[0]
-                    row[p_label] = f"{cnt} ({pct:.1f}%)"
-                state_pheno_matrix.append(row)
+        geo_pheno_matrix = []
+        for r_name in regions:
+            r_data = reg.get(r_name, {})
+            p_dict = (r_data.get('pgx_summary') or r_data.get(f"{active_gene.lower()}_summary") or r_data.get('cyp2c19_summary', {})).get('phenotypes', {})
+            row = {'Geographic Region': r_name, 'Total Sample N': r_data.get('sample_count', 0)}
+            for p_cat in pheno_order:
+                cnt = p_dict.get(p_cat, {}).get('count', 0)
+                pct = p_dict.get(p_cat, {}).get('percentage', 0.0)
+                p_label = p_cat.split(' (')[0]
+                row[p_label] = f"{cnt} ({pct:.1f}%)"
+            geo_pheno_matrix.append(row)
 
-        # Include summary row for total cohort
         tot_p = (ov.get('pgx_summary') or ov.get(f"{active_gene.lower()}_summary") or ov.get('cyp2c19_summary', {})).get('phenotypes', {})
-        tot_row = {'State': 'Total Cohort (All States Combined)', 'Total Sample N': ov.get('sample_count', 0)}
+        tot_row = {'Geographic Region': 'Total Cohort (All Regions Combined)', 'Total Sample N': ov.get('sample_count', 0)}
         for p_cat in pheno_order:
             cnt = tot_p.get(p_cat, {}).get('count', 0)
             pct = tot_p.get(p_cat, {}).get('percentage', 0.0)
             p_label = p_cat.split(' (')[0]
             tot_row[p_label] = f"{cnt} ({pct:.1f}%)"
-        state_pheno_matrix.append(tot_row)
+        geo_pheno_matrix.append(tot_row)
 
-        st.dataframe(pd.DataFrame(state_pheno_matrix), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(geo_pheno_matrix), use_container_width=True, hide_index=True)
 
     # -------------------------------------------------------------------------
     # TAB 8: GENDER-WISE ANALYSIS
@@ -2198,6 +2213,35 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     st.plotly_chart(fig_st_phe, use_container_width=True)
                 else:
                     st.info(f"No {active_gene} phenotype calls for {selected_st}.")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(f"#### 💊 State-Wise Metabolizer Phenotype Distribution Matrix ({active_gene})")
+            st.caption(f"Distribution of CPIC {active_gene} Metabolizer Phenotypes across individual states in your cohort.")
+
+            pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
+            st_dict = full_results.get('state_wise', {})
+            state_pheno_matrix = []
+            for s_name, s_data in sorted(st_dict.items(), key=lambda x: x[1].get('sample_count', 0), reverse=True):
+                if s_data.get('sample_count', 0) > 0:
+                    p_dict = (s_data.get('pgx_summary') or s_data.get(f"{active_gene.lower()}_summary") or s_data.get('cyp2c19_summary', {})).get('phenotypes', {})
+                    row = {'State': s_name, 'Total Sample N': s_data.get('sample_count', 0)}
+                    for p_cat in pheno_order:
+                        cnt = p_dict.get(p_cat, {}).get('count', 0)
+                        pct = p_dict.get(p_cat, {}).get('percentage', 0.0)
+                        p_label = p_cat.split(' (')[0]
+                        row[p_label] = f"{cnt} ({pct:.1f}%)"
+                    state_pheno_matrix.append(row)
+
+            tot_p = (ov.get('pgx_summary') or ov.get(f"{active_gene.lower()}_summary") or ov.get('cyp2c19_summary', {})).get('phenotypes', {})
+            tot_row = {'State': 'Total Cohort (All States Combined)', 'Total Sample N': ov.get('sample_count', 0)}
+            for p_cat in pheno_order:
+                cnt = tot_p.get(p_cat, {}).get('count', 0)
+                pct = tot_p.get(p_cat, {}).get('percentage', 0.0)
+                p_label = p_cat.split(' (')[0]
+                tot_row[p_label] = f"{cnt} ({pct:.1f}%)"
+            state_pheno_matrix.append(tot_row)
+
+            st.dataframe(pd.DataFrame(state_pheno_matrix), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
 # 3-STEP WORKFLOW PIPELINE RENDERER (EXACT MATCH FOR USER SCREENSHOTS 1, 2, 3, 4, 5)
@@ -4177,10 +4221,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             final_mapping[demo['Gender']] = 'Gender'
                         if demo.get('State') and demo['State'] in all_cols:
                             final_mapping[demo['State']] = 'State'
-
                         custom_rules_for_qc = {}
                         for m_col, m_info in mapped_marker_dict.items():
                             final_mapping[m_col] = m_info['std_name']
+                            perm_list = m_info.get('permitted_genotypes', [])
                             r_a = m_info['ref_allele']
                             v_a = m_info['var_allele']
                             if perm_list:
