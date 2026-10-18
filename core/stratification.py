@@ -6,7 +6,7 @@ State-Wise (Individual States), and Gender subgroups, computing full genetic and
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import re
 
 from config import STATE_TO_REGION, CITY_TO_STATE, SNP_CONFIG, CYP2C9_SNP_CONFIG
@@ -83,7 +83,7 @@ class DemographicStratifier:
         return 'Unclassified / Other'
 
     @classmethod
-    def stratify_and_analyze(cls, df: pd.DataFrame) -> Dict[str, Any]:
+    def stratify_and_analyze(cls, df: pd.DataFrame, custom_snp_rules: Optional[Dict] = None, active_gene: Optional[str] = None) -> Dict[str, Any]:
         """
         Performs end-to-end demographic stratification and statistical calculations.
         Detects target gene (CYP2C19, CYP2C9, or custom) and computes full CPIC diplotypes,
@@ -94,13 +94,25 @@ class DemographicStratifier:
         # Ensure Region column is populated
         data['Region'] = data.apply(cls.assign_region, axis=1)
         
-        # Detect active gene from column names
-        cols_lower = [str(c).lower().replace(" ", "").replace("_", "").replace("-", "") for c in data.columns]
-        is_cyp2c9 = any('cyp2c9' in c or 'rs1799853' in c or 'rs1057910' in c for c in cols_lower)
-        is_cyp2c19 = any('cyp2c19' in c or 'rs4244285' in c or 'rs4986893' in c or 'rs12248560' in c for c in cols_lower)
+        # Detect active gene from parameter or column names
+        if not active_gene:
+            cols_lower = [str(c).lower().replace(" ", "").replace("_", "").replace("-", "") for c in data.columns]
+            is_cyp2c9 = any('cyp2c9' in c or 'rs1799853' in c or 'rs1057910' in c for c in cols_lower)
+            is_cyp2c19 = any('cyp2c19' in c or 'rs4244285' in c or 'rs4986893' in c or 'rs12248560' in c for c in cols_lower)
+            active_gene = 'CYP2C9' if is_cyp2c9 else ('CYP2C19' if is_cyp2c19 else 'Custom')
+        else:
+            active_gene = str(active_gene).upper().strip()
+            is_cyp2c9 = (active_gene == 'CYP2C9')
+            is_cyp2c19 = (active_gene == 'CYP2C19')
 
-        active_gene = 'CYP2C9' if is_cyp2c9 else ('CYP2C19' if is_cyp2c19 else 'Custom')
-        active_snp_rules = CYP2C9_SNP_CONFIG if is_cyp2c9 else (SNP_CONFIG if is_cyp2c19 else {})
+        if custom_snp_rules:
+            active_snp_rules = dict(custom_snp_rules)
+        elif is_cyp2c9:
+            active_snp_rules = CYP2C9_SNP_CONFIG
+        elif is_cyp2c19:
+            active_snp_rules = SNP_CONFIG
+        else:
+            active_snp_rules = {}
 
         # Apply appropriate translator across full dataset
         if is_cyp2c9:
@@ -128,34 +140,39 @@ class DemographicStratifier:
             else:
                 data_processed['Gender_Clean'] = 'Unknown'
 
+        # Candidate SNP list: prioritize mapped rules present in columns
+        target_snps = [s for s in active_snp_rules.keys() if s in data_processed.columns]
+        if not target_snps:
+            target_snps = list(active_snp_rules.keys())
+        if not target_snps or not any(s in data_processed.columns for s in target_snps):
+            target_snps = [c for c in data_processed.columns if ('*' in c or 'rs' in c.lower() or any(g.lower() in c.lower() for g in ['cyp', 'tpmt', 'dpyd', 'vkorc1', 'nudt15', 'slco1b1'])) and c not in ('Sample_ID', 'Region', 'Gender', 'State', 'State_Clean', 'Gender_Clean', 'Diplotype', 'Phenotype', 'Activity_Score', 'Test_Requested', 'Date_of_Birth')]
+
         results = {
             'overall': {},
             'regional': {},
             'state_wise': {},
             'gender': {},
             'processed_dataframe': data_processed,
-            'active_gene': active_gene
+            'active_gene': active_gene,
+            'target_gene': active_gene,
+            'markers': target_snps
         }
         
         # Helper to compute full stats bundle for any dataframe slice
         def analyze_subgroup(sub_df: pd.DataFrame, group_name: str) -> Dict[str, Any]:
             n_sub = len(sub_df)
             
-            # Identify candidate SNP columns to analyze
-            target_snps = list(active_snp_rules.keys())
-            if not target_snps:
-                # Find any genotype-like columns in sub_df
-                target_snps = [c for c in sub_df.columns if ('*' in c or 'rs' in c.lower() or 'cyp' in c.lower()) and c not in ('Sample_ID', 'Region', 'Gender', 'State', 'Diplotype', 'Phenotype')]
-
             missing_genotypes_sub = 0
             for snp_name in target_snps:
-                # Check direct or partial match
                 matched_col = None
-                for c in sub_df.columns:
-                    if snp_name.lower() in str(c).lower() or str(c).lower() in snp_name.lower():
-                        matched_col = c
-                        break
-                if matched_col:
+                if snp_name in sub_df.columns:
+                    matched_col = snp_name
+                else:
+                    for c in sub_df.columns:
+                        if snp_name.lower() in str(c).lower() or str(c).lower() in snp_name.lower():
+                            matched_col = c
+                            break
+                if matched_col and matched_col in sub_df.columns:
                     missing_genotypes_sub += int(sub_df[matched_col].isna().sum())
                     
             denom_snps = len(target_snps) if target_snps else 1
@@ -174,10 +191,13 @@ class DemographicStratifier:
             # SNP Stats
             for snp_name in target_snps:
                 matched_col = None
-                for c in sub_df.columns:
-                    if snp_name.lower() in str(c).lower() or str(c).lower() in snp_name.lower():
-                        matched_col = c
-                        break
+                if snp_name in sub_df.columns:
+                    matched_col = snp_name
+                else:
+                    for c in sub_df.columns:
+                        if snp_name.lower() in str(c).lower() or str(c).lower() in snp_name.lower():
+                            matched_col = c
+                            break
                 if matched_col and matched_col in sub_df.columns:
                     rule_info = active_snp_rules.get(snp_name)
                     sub_results['snps'][snp_name] = GeneticStatsEngine.analyze_snp(sub_df[matched_col], snp_name, custom_info=rule_info)
@@ -192,6 +212,8 @@ class DemographicStratifier:
                 _, pgx_sum = CYP2C19Translator.process_dataframe(sub_df)
                 sub_results['cyp2c19_summary'] = pgx_sum
                 sub_results['pgx_summary'] = pgx_sum
+            else:
+                sub_results['pgx_summary'] = {'phenotypes': {}, 'diplotypes': {}, 'total_samples': n_sub}
             
             return sub_results
 

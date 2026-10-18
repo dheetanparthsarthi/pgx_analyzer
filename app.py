@@ -661,7 +661,7 @@ def reset_all_data():
 
 # High performance in-memory cached analysis execution pipeline
 @st.cache_data(show_spinner=False)
-def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tuple: tuple = ()):
+def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tuple: tuple = (), active_gene: str = None):
     mapped_dict = dict(mapped_cols_tuple)
     snp_rules = {k: dict(v) for k, v in snp_rules_tuple} if snp_rules_tuple else None
     if df is None or len(df) == 0:
@@ -676,11 +676,13 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tupl
             'snp_qc_stats': {}
         }
         full_results = {
-            'overall': {'sample_count': 0, 'snps': {}, 'cyp2c19_summary': {'phenotypes': {}, 'diplotypes': {}}},
+            'overall': {'sample_count': 0, 'snps': {}, 'pgx_summary': {'phenotypes': {}, 'diplotypes': {}}, 'cyp2c19_summary': {'phenotypes': {}, 'diplotypes': {}}, 'cyp2c9_summary': {'phenotypes': {}, 'diplotypes': {}}},
             'regional': {},
             'state_wise': {},
             'gender': {},
-            'processed_dataframe': pd.DataFrame()
+            'processed_dataframe': pd.DataFrame(),
+            'active_gene': active_gene,
+            'target_gene': active_gene
         }
         return clean_df, qc_report, full_results
 
@@ -699,7 +701,7 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tupl
             except Exception:
                 pass
     clean_df, qc_report = qc_engine.run_qc()
-    full_results = DemographicStratifier.stratify_and_analyze(clean_df)
+    full_results = DemographicStratifier.stratify_and_analyze(clean_df, custom_snp_rules=snp_rules, active_gene=active_gene)
     return clean_df, qc_report, full_results
 
 # Execute Pipeline
@@ -721,7 +723,7 @@ def serialize_rules(rules_dict):
     return tuple(serialized)
 
 snp_rules_items = serialize_rules(st.session_state.get('custom_snp_rules', {}))
-clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items)
+clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items, active_gene=st.session_state.get('selected_gene'))
 processed_df = full_results.get('processed_dataframe', pd.DataFrame())
 
 # Helper to check active dataset state
@@ -840,7 +842,21 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     cyp2c19_markers_present = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in processed_df.columns]
     cyp2c9_markers_present = [c for c in ['CYP2C9*2', 'CYP2C9*3'] if c in processed_df.columns]
 
-    if len(cyp2c19_markers_present) >= 2:
+    if ('CYP2C9' in str(target_gene).upper() or not cyp2c19_markers_present) and len(cyp2c9_markers_present) >= 2:
+        st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
+        avail_options = ["CYP2C9 *2 + *3 (c.430C>T / c.1075A>C · Decreased Function Panel)"]
+        variant_combo_choice = st.radio(
+            "Variant Combination:",
+            avail_options,
+            horizontal=True,
+            key="studio_variant_combo_choice_cyp2c9",
+            label_visibility="collapsed"
+        )
+        active_snps = ['CYP2C9*2', 'CYP2C9*3']
+        combo_title = "CYP2C9 *2 + *3"
+        std_snps_label = "c.430C>T & c.1075A>C"
+        rs_label = "rs1799853 + rs1057910"
+    elif len(cyp2c19_markers_present) >= 2:
         st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
         avail_options = []
         if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*3' in cyp2c19_markers_present:
@@ -1234,6 +1250,8 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             'CYP2C19*2': 'rs4244285 (*2, c.681G>A)',
             'CYP2C19*3': 'rs4986893 (*3, c.636G>A)',
             'CYP2C19*17': 'rs12248560 (*17, c.-806C>T)',
+            'CYP2C9*2': 'rs1799853 (*2, c.430C>T)',
+            'CYP2C9*3': 'rs1057910 (*3, c.1075A>C)',
             'Combination Pattern': 'Multi-Locus Pattern',
             'Sample Count (N)': 'Samples (N)',
             'CPIC Phenotype(s)': 'CPIC Clinical Phenotype'
@@ -1244,6 +1262,8 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             'CYP2C19*2': 'CYP2C19*2 (c.681G>A)',
             'CYP2C19*3': 'CYP2C19*3 (c.636G>A)',
             'CYP2C19*17': 'CYP2C19*17 (c.-806C>T)',
+            'CYP2C9*2': 'CYP2C9*2 (c.430C>T)',
+            'CYP2C9*3': 'CYP2C9*3 (c.1075A>C)',
             'Combination Pattern': 'Genotype Combination',
             'Sample Count (N)': 'Samples (N)',
             'CPIC Phenotype(s)': 'CPIC Clinical Phenotype'
@@ -1272,7 +1292,16 @@ def render_unified_results(full_results: dict, qc_report: dict):
         st.divider()
 
     active_gene = full_results.get('active_gene') or full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+    active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG, **st.session_state.get('custom_snp_rules', {})}
     ov = full_results['overall']
+    active_markers = list(ov.get('snps', {}).keys())
+    if not active_markers and 'markers' in full_results:
+        active_markers = [m for m in full_results['markers'] if m]
+    if not active_markers and 'uploaded_df' in st.session_state and st.session_state['uploaded_df'] is not None:
+        active_markers = [c for c in st.session_state['uploaded_df'].columns if ('*' in c or 'rs' in c.lower() or active_gene.lower() in c.lower()) and c not in ('Sample_ID', 'Region', 'Gender', 'State', 'State_Clean', 'Gender_Clean', 'Diplotype', 'Phenotype', 'Activity_Score', 'Test_Requested', 'Date_of_Birth')]
+    if not active_markers:
+        active_markers = ['CYP2C9*2', 'CYP2C9*3'] if 'CYP2C9' in str(active_gene).upper() else ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
+
     tot_samples = qc_report.get('total_samples', ov['sample_count'])
     fully_valid = qc_report.get('fully_valid_samples', ov['sample_count'])
     dup_count = qc_report.get('duplicate_sample_count', 0)
@@ -1834,18 +1863,35 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # TAB 7: GEOGRAPHIC POPULATION GROUPS
     # -------------------------------------------------------------------------
     with tab_geo:
-        st.markdown("### 🌐 Geographic Population Groups Analysis")
-        reg = full_results['regional']
+        st.markdown(f"### 🌐 Geographic Population Groups Analysis ({active_gene})")
+        reg = full_results.get('regional', {})
         regions = ['South India', 'North India', 'East India', 'West India', 'Central India']
         
         cols = st.columns(5)
         for idx, r in enumerate(regions):
             r_data = reg.get(r, {})
             snps_r = r_data.get('snps', {})
-            c2_maf = snps_r.get('CYP2C19*2', {}).get('allele_freqs', {}).get('A', 0)
-            c3_maf = snps_r.get('CYP2C19*3', {}).get('allele_freqs', {}).get('A', 0)
-            c17_maf = snps_r.get('CYP2C19*17', {}).get('allele_freqs', {}).get('T', 0)
-            pm_val = r_data.get('cyp2c19_summary', {}).get('phenotypes', {}).get('Poor Metabolizer', r_data.get('cyp2c19_summary', {}).get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
+            pgx_r = r_data.get('pgx_summary') or r_data.get(f"{active_gene.lower()}_summary") or r_data.get('cyp2c19_summary', {})
+            pm_val = pgx_r.get('phenotypes', {}).get('Poor Metabolizer', pgx_r.get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
+
+            card_lines = []
+            for m in active_markers[:3]:
+                m_conf = active_snp_conf.get(m, {})
+                var_al = m_conf.get('var_allele')
+                al_freqs = snps_r.get(m, {}).get('allele_freqs', {})
+                if not var_al:
+                    ref_al = m_conf.get('ref_allele')
+                    non_refs = [a for a in al_freqs.keys() if a != ref_al]
+                    var_al = non_refs[0] if non_refs else (list(al_freqs.keys())[0] if al_freqs else 'Var')
+                maf_val = snps_r.get(m, {}).get('allele_freqs', {}).get(var_al, snps_r.get(m, {}).get('maf', 0))
+                m_lbl = m.replace('CYP2C19', '').replace('CYP2C9', '').strip()
+                if not m_lbl:
+                    m_lbl = m
+                card_lines.append(f"{m_lbl} MAF ({var_al}): <strong>{maf_val}</strong>")
+
+            lines_html = "<br>".join(card_lines)
+            if lines_html:
+                lines_html += "<br>"
 
             with cols[idx]:
                 st.markdown(f"""
@@ -1853,10 +1899,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     <div class="kpi-lbl">{r}</div>
                     <div class="kpi-val">{r_data.get('sample_count', 0):,}</div>
                     <div style="font-size: 0.78rem; color: #475569; margin-top: 0.3rem; line-height: 1.4;">
-                        *2 MAF (A): <strong>{c2_maf}</strong><br>
-                        *3 MAF (A): <strong>{c3_maf}</strong><br>
-                        *17 MAF (T): <strong>{c17_maf}</strong><br>
-                        PM: <strong style="color: #EF4444;">{pm_val:.1f}%</strong>
+                        {lines_html}PM: <strong style="color: #EF4444;">{pm_val:.1f}%</strong>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -1868,17 +1911,29 @@ def render_unified_results(full_results: dict, qc_report: dict):
             geo_marker_data = []
             for r in regions:
                 r_snps = reg.get(r, {}).get('snps', {})
-                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*2 (f_A)', 'Minor Allele Frequency': float(r_snps.get('CYP2C19*2', {}).get('allele_freqs', {}).get('A', 0))})
-                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*3 (f_A)', 'Minor Allele Frequency': float(r_snps.get('CYP2C19*3', {}).get('allele_freqs', {}).get('A', 0))})
-                geo_marker_data.append({'Geographic Group': r, 'Biomarker': 'CYP2C19*17 (f_T)', 'Minor Allele Frequency': float(r_snps.get('CYP2C19*17', {}).get('allele_freqs', {}).get('T', 0))})
+                for m in active_markers:
+                    m_conf = active_snp_conf.get(m, {})
+                    var_al = m_conf.get('var_allele')
+                    al_freqs = r_snps.get(m, {}).get('allele_freqs', {})
+                    if not var_al:
+                        ref_al = m_conf.get('ref_allele')
+                        non_refs = [a for a in al_freqs.keys() if a != ref_al]
+                        var_al = non_refs[0] if non_refs else (list(al_freqs.keys())[0] if al_freqs else 'Var')
+                    maf = float(al_freqs.get(var_al, r_snps.get(m, {}).get('maf', 0.0)))
+                    geo_marker_data.append({
+                        'Geographic Group': r,
+                        'Biomarker': f"{m} (f_{var_al})",
+                        'Minor Allele Frequency': maf
+                    })
             geo_df = pd.DataFrame(geo_marker_data, columns=['Geographic Group', 'Biomarker', 'Minor Allele Frequency'])
             if not geo_df.empty:
+                marker_colors = ['#2563EB', '#059669', '#D97706', '#9333EA', '#DC2626', '#0891B2']
                 fig_geo_all = px.bar(
                     geo_df,
                     x='Geographic Group', y='Minor Allele Frequency',
                     color='Biomarker', barmode='group',
-                    title="All Biomarkers (CYP2C19*2, *3, *17) MAF Across Geographic Groups",
-                    color_discrete_map={'CYP2C19*2 (f_A)': '#2563EB', 'CYP2C19*3 (f_A)': '#059669', 'CYP2C19*17 (f_T)': '#D97706'}
+                    title=f"All Biomarkers ({', '.join(active_markers)}) MAF Across Geographic Groups",
+                    color_discrete_sequence=marker_colors
                 )
                 fig_geo_all.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_geo_all, use_container_width=True)
@@ -1886,7 +1941,8 @@ def render_unified_results(full_results: dict, qc_report: dict):
         with c_geo2:
             geo_pheno_data = []
             for r in regions:
-                p_dict = reg.get(r, {}).get('cyp2c19_summary', {}).get('phenotypes', {})
+                r_data = reg.get(r, {})
+                p_dict = (r_data.get('pgx_summary') or r_data.get(f"{active_gene.lower()}_summary") or r_data.get('cyp2c19_summary', {})).get('phenotypes', {})
                 pm_val = p_dict.get('Poor Metabolizer', p_dict.get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
                 im_val = p_dict.get('Intermediate Metabolizer', p_dict.get('Intermediate Metabolizer (IM)', {})).get('percentage', 0.0)
                 try:
@@ -1905,7 +1961,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     geo_pm_df,
                     x='Geographic Group', y='Percentage',
                     color='Phenotype', barmode='group',
-                    title="Clinical Phenotypes (PM & IM %) Across Geographic Groups",
+                    title=f"Clinical Phenotypes (PM & IM %) Across Geographic Groups ({active_gene})",
                     color_discrete_map={'Poor Metabolizer (PM %)': '#DC2626', 'Intermediate Metabolizer (IM %)': '#D97706'}
                 )
                 fig_geo_pm.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
@@ -1913,19 +1969,29 @@ def render_unified_results(full_results: dict, qc_report: dict):
 
         st.markdown("#### Comprehensive Population Statistical Summary Matrix")
         
-        t_cyp2, t_cyp3, t_cyp17 = st.tabs([
-            "🧬 CYP2C19*2 (rs4244285)", 
-            "🧬 CYP2C19*3 (rs4986893)", 
-            "🧬 CYP2C19*17 (rs12248560)"
-        ])
-
         def render_marker_geo_table(snp_key):
-            snp_conf_sel = SNP_CONFIG.get(snp_key, {})
-            ref_al = snp_conf_sel.get('ref_allele', 'G')
-            var_al = snp_conf_sel.get('var_allele', 'A')
-            wt_g = snp_conf_sel.get('wildtype_genotype', 'GG')
-            het_g = snp_conf_sel.get('het_genotype', 'GA')
-            var_g = snp_conf_sel.get('hom_var_genotype', 'AA')
+            snp_conf_sel = active_snp_conf.get(snp_key, {})
+            ov_snp = ov.get('snps', {}).get(snp_key, {})
+            al_counts = ov_snp.get('allele_counts', {})
+            gt_counts = ov_snp.get('genotype_counts', {})
+            
+            ref_al = snp_conf_sel.get('ref_allele')
+            var_al = snp_conf_sel.get('var_allele')
+            if not ref_al or not var_al:
+                sorted_als = sorted(al_counts.items(), key=lambda x: x[1], reverse=True)
+                ref_al = ref_al or (sorted_als[0][0] if sorted_als else 'Ref')
+                var_al = var_al or (sorted_als[1][0] if len(sorted_als) > 1 else 'Var')
+                
+            wt_g = snp_conf_sel.get('wildtype_genotype') or (ref_al + ref_al)
+            var_g = snp_conf_sel.get('hom_var_genotype') or (var_al + var_al)
+            het_g = snp_conf_sel.get('het_genotype')
+            if not het_g:
+                if f"{ref_al}{var_al}" in gt_counts:
+                    het_g = f"{ref_al}{var_al}"
+                elif f"{var_al}{ref_al}" in gt_counts:
+                    het_g = f"{var_al}{ref_al}"
+                else:
+                    het_g = f"{ref_al}{var_al}"
 
             rows_cfg = [
                 (f'{var_al} Count (Variant Allele)', lambda s: s.get(snp_key, {}).get('allele_counts', {}).get(var_al, 0)),
@@ -1949,24 +2015,32 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 m_matrix.append(row_item)
             st.dataframe(pd.DataFrame(m_matrix), use_container_width=True, hide_index=True)
 
-        with t_cyp2:
-            render_marker_geo_table('CYP2C19*2')
-        with t_cyp3:
-            render_marker_geo_table('CYP2C19*3')
-        with t_cyp17:
-            render_marker_geo_table('CYP2C19*17')
+        marker_tab_labels = []
+        for m in active_markers:
+            rs_id = active_snp_conf.get(m, {}).get('rs_id')
+            label = f"🧬 {m}" + (f" ({rs_id})" if rs_id else "")
+            marker_tab_labels.append(label)
+
+        if marker_tab_labels:
+            marker_tabs = st.tabs(marker_tab_labels)
+            for m_idx, m_name in enumerate(active_markers):
+                with marker_tabs[m_idx]:
+                    render_marker_geo_table(m_name)
+        else:
+            st.info("No active markers to display.")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 💊 State-Wise Metabolizer Phenotype Distribution Matrix")
-        st.caption("Distribution of CPIC CYP2C19 Metabolizer Phenotypes across individual states in your cohort.")
+        st.markdown(f"#### 💊 State-Wise Metabolizer Phenotype Distribution Matrix ({active_gene})")
+        st.caption(f"Distribution of CPIC {active_gene} Metabolizer Phenotypes across individual states in your cohort.")
 
+        pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
         st_dict = full_results.get('state_wise', {})
         state_pheno_matrix = []
         for s_name, s_data in sorted(st_dict.items(), key=lambda x: x[1].get('sample_count', 0), reverse=True):
             if s_data.get('sample_count', 0) > 0:
-                p_dict = s_data.get('cyp2c19_summary', {}).get('phenotypes', {})
+                p_dict = (s_data.get('pgx_summary') or s_data.get(f"{active_gene.lower()}_summary") or s_data.get('cyp2c19_summary', {})).get('phenotypes', {})
                 row = {'State': s_name, 'Total Sample N': s_data.get('sample_count', 0)}
-                for p_cat in PHENOTYPE_ORDER:
+                for p_cat in pheno_order:
                     cnt = p_dict.get(p_cat, {}).get('count', 0)
                     pct = p_dict.get(p_cat, {}).get('percentage', 0.0)
                     p_label = p_cat.split(' (')[0]
@@ -1974,9 +2048,9 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 state_pheno_matrix.append(row)
 
         # Include summary row for total cohort
-        tot_p = ov.get('cyp2c19_summary', {}).get('phenotypes', {})
+        tot_p = (ov.get('pgx_summary') or ov.get(f"{active_gene.lower()}_summary") or ov.get('cyp2c19_summary', {})).get('phenotypes', {})
         tot_row = {'State': 'Total Cohort (All States Combined)', 'Total Sample N': ov.get('sample_count', 0)}
-        for p_cat in PHENOTYPE_ORDER:
+        for p_cat in pheno_order:
             cnt = tot_p.get(p_cat, {}).get('count', 0)
             pct = tot_p.get(p_cat, {}).get('percentage', 0.0)
             p_label = p_cat.split(' (')[0]
@@ -1989,7 +2063,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # TAB 8: GENDER-WISE ANALYSIS
     # -------------------------------------------------------------------------
     with tab_gender:
-        st.markdown("### 👫 Gender-Wise Population Pharmacogenomics Analysis")
+        st.markdown(f"### 👫 Gender-Wise Population Pharmacogenomics Analysis ({active_gene})")
         gender_data = full_results.get('gender', {})
         male = gender_data.get('Male', {})
         female = gender_data.get('Female', {})
@@ -2003,14 +2077,15 @@ def render_unified_results(full_results: dict, qc_report: dict):
         gk2.metric("Female Samples (N)", f"{f_count:,}")
         gk3.metric("Total Cohort N", f"{tot_count:,}")
         
-        m_phenos = male.get('cyp2c19_summary', {}).get('phenotypes', {})
-        f_phenos = female.get('cyp2c19_summary', {}).get('phenotypes', {})
+        m_phenos = (male.get('pgx_summary') or male.get(f"{active_gene.lower()}_summary") or male.get('cyp2c19_summary', {})).get('phenotypes', {})
+        f_phenos = (female.get('pgx_summary') or female.get(f"{active_gene.lower()}_summary") or female.get('cyp2c19_summary', {})).get('phenotypes', {})
         
+        pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
         pheno_chart_df = []
-        for p_name in PHENOTYPE_ORDER:
-            if p_name in m_phenos:
+        for p_name in pheno_order:
+            if p_name in m_phenos and m_phenos[p_name].get('count', 0) > 0:
                 pheno_chart_df.append({'Gender': 'Male', 'Phenotype': p_name.split(' (')[0], 'Count': m_phenos[p_name]['count']})
-            if p_name in f_phenos:
+            if p_name in f_phenos and f_phenos[p_name].get('count', 0) > 0:
                 pheno_chart_df.append({'Gender': 'Female', 'Phenotype': p_name.split(' (')[0], 'Count': f_phenos[p_name]['count']})
                 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -2021,17 +2096,21 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     pd.DataFrame(pheno_chart_df), 
                     x='Phenotype', y='Count', 
                     color='Gender', barmode='group', 
-                    title="Metabolizer Phenotypes Comparison (Male vs Female)",
+                    title=f"Metabolizer Phenotypes Comparison ({active_gene} Male vs Female)",
                     color_discrete_sequence=['#2563EB', '#EC4899']
                 )
                 fig_g2.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_g2, use_container_width=True)
+            else:
+                st.info("No gender-stratified phenotype calls available.")
 
         with cg2:
-            m_snps = male.get('snps', {}).get('CYP2C19*2', {}).get('genotype_counts', {})
-            f_snps = female.get('snps', {}).get('CYP2C19*2', {}).get('genotype_counts', {})
+            sel_gender_marker = st.selectbox("Select Biomarker to Compare:", active_markers, key="gender_biomarker_sel") if len(active_markers) > 1 else (active_markers[0] if active_markers else 'Biomarker')
+            m_snps = male.get('snps', {}).get(sel_gender_marker, {}).get('genotype_counts', {})
+            f_snps = female.get('snps', {}).get(sel_gender_marker, {}).get('genotype_counts', {})
+            all_observed_gts = sorted(list(set(list(m_snps.keys()) + list(f_snps.keys()))))
             gen_gt_df = []
-            for gt in ['GG', 'GA', 'AA']:
+            for gt in all_observed_gts:
                 if gt in m_snps:
                     gen_gt_df.append({'Gender': 'Male', 'Genotype': gt, 'Count': m_snps[gt]})
                 if gt in f_snps:
@@ -2039,17 +2118,19 @@ def render_unified_results(full_results: dict, qc_report: dict):
             if gen_gt_df:
                 fig_gen_gt = px.bar(
                     pd.DataFrame(gen_gt_df), x='Genotype', y='Count', color='Gender', barmode='group',
-                    title="CYP2C19*2 Genotypes Comparison (Male vs Female)",
+                    title=f"{sel_gender_marker} Genotypes Comparison (Male vs Female)",
                     color_discrete_sequence=['#2563EB', '#EC4899']
                 )
                 fig_gen_gt.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_gen_gt, use_container_width=True)
+            else:
+                st.info(f"No genotype calls to compare for {sel_gender_marker}.")
 
     # -------------------------------------------------------------------------
     # TAB 9: DEDICATED STATE-WISE PAGES
     # -------------------------------------------------------------------------
     with tab_state:
-        st.markdown("### 📍 Dedicated Individual State Profiles")
+        st.markdown(f"### 📍 Dedicated Individual State Profiles ({active_gene})")
         state_dict = full_results.get('state_wise', {})
         state_names = sorted(list(state_dict.keys()))
         
@@ -2057,16 +2138,27 @@ def render_unified_results(full_results: dict, qc_report: dict):
             selected_st = st.selectbox("Select Dedicated State Profile:", state_names, index=0, key="st_tab_selectbox")
             st_data = state_dict[selected_st]
             
+            primary_marker = active_markers[0] if active_markers else 'Biomarker'
+            m_conf = active_snp_conf.get(primary_marker, {})
+            var_al = m_conf.get('var_allele')
+            al_freqs = st_data.get('snps', {}).get(primary_marker, {}).get('allele_freqs', {})
+            if not var_al:
+                ref_al = m_conf.get('ref_allele')
+                non_refs = [a for a in al_freqs.keys() if a != ref_al]
+                var_al = non_refs[0] if non_refs else (list(al_freqs.keys())[0] if al_freqs else 'Var')
+            marker_freq = al_freqs.get(var_al, st_data.get('snps', {}).get(primary_marker, {}).get('maf', 0))
+
+            pgx_st = st_data.get('pgx_summary') or st_data.get(f"{active_gene.lower()}_summary") or st_data.get('cyp2c19_summary', {})
+            pm_pct = pgx_st.get('phenotypes', {}).get('Poor Metabolizer', pgx_st.get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
+
             sk1, sk2, sk3, sk4 = st.columns(4)
             sk1.metric("State Sample N", st_data.get('sample_count', 0))
             sk2.metric("Missing Data Rate", f"{st_data.get('missing_pct', 0)}%")
-            cyp2_freq = st_data.get('snps', {}).get('CYP2C19*2', {}).get('allele_freqs', {}).get('A', 0)
-            sk3.metric("CYP2C19*2 Var Freq", cyp2_freq)
-            pm_pct = st_data.get('cyp2c19_summary', {}).get('phenotypes', {}).get('Poor Metabolizer', st_data.get('cyp2c19_summary', {}).get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0)
+            sk3.metric(f"{primary_marker} Var Freq ({var_al})", marker_freq)
             sk4.metric("Poor Metabolizers %", f"{pm_pct:.1f}%")
 
-            st_phenos = st_data.get('cyp2c19_summary', {}).get('phenotypes', {})
-            st_snps = st_data.get('snps', {}).get('CYP2C19*2', {}).get('genotype_counts', {})
+            st_phenos = pgx_st.get('phenotypes', {})
+            st_snps = st_data.get('snps', {}).get(primary_marker, {}).get('genotype_counts', {})
             
             cs1, cs2 = st.columns(2)
             with cs1:
@@ -2074,23 +2166,27 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 if not st_gt_df.empty:
                     fig_st_gt = px.bar(
                         st_gt_df, x='Genotype', y='Count',
-                        title=f"{selected_st} — CYP2C19*2 Genotypes",
+                        title=f"{selected_st} — {primary_marker} Genotypes",
                         color='Genotype',
-                        color_discrete_sequence=['#16A34A', '#2563EB', '#DC2626']
+                        color_discrete_sequence=['#16A34A', '#2563EB', '#DC2626', '#D97706']
                     )
                     fig_st_gt.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
                     st.plotly_chart(fig_st_gt, use_container_width=True)
+                else:
+                    st.info(f"No {primary_marker} genotype data for {selected_st}.")
 
             with cs2:
                 st_phe_df = pd.DataFrame([{'Phenotype': k.split(' (')[0], 'Count': v['count']} for k, v in st_phenos.items() if v['count'] > 0])
                 if not st_phe_df.empty:
                     fig_st_phe = px.pie(
                         st_phe_df, names='Phenotype', values='Count', hole=0.45,
-                        title=f"{selected_st} — Metabolizer Phenotypes",
+                        title=f"{selected_st} — {active_gene} Metabolizer Phenotypes",
                         color_discrete_sequence=['#166534', '#1E40AF', '#4B5563', '#991B1B', '#D97706', '#0D9488']
                     )
                     fig_st_phe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
                     st.plotly_chart(fig_st_phe, use_container_width=True)
+                else:
+                    st.info(f"No {active_gene} phenotype calls for {selected_st}.")
 
 # -----------------------------------------------------------------------------
 # 3-STEP WORKFLOW PIPELINE RENDERER (EXACT MATCH FOR USER SCREENSHOTS 1, 2, 3, 4, 5)
@@ -4227,9 +4323,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         key="btn_res_full_dl_csv"
                     )
 
-            st.markdown("""
+            target_gene_lbl = full_results.get('active_gene') or full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+            st.markdown(f"""
             <div class="footer-disclaimer-text">
-                PGx Pop MVP · CYP2C19 calling uses a simplified unphased-genotype heuristic — see notes in the CYP2C19 tab · Not for clinical use without independent validation.
+                PGx Pop MVP · {target_gene_lbl} calling uses a standardized CPIC-aligned unphased-genotype heuristic — see notes in the {target_gene_lbl} tab · Not for clinical use without independent validation.
             </div>
             """, unsafe_allow_html=True)
 

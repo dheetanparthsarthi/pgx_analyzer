@@ -49,3 +49,21 @@ def test_database_batch_insertion(tmp_path):
     inserted2, skipped2 = db.insert_batch(data)
     assert inserted2 == 0
     assert skipped2 == 2
+
+
+def test_cyp2c9_stratification():
+    data = pd.DataFrame([
+        {'Sample_ID': 'S1', 'State_Clean': 'Punjab', 'CYP2C9*2': 'CC', 'CYP2C9*3': 'AA', 'Gender_Clean': 'Male'},
+        {'Sample_ID': 'S2', 'State_Clean': 'Karnataka', 'CYP2C9*2': 'CT', 'CYP2C9*3': 'AA', 'Gender_Clean': 'Female'},
+        {'Sample_ID': 'S3', 'State_Clean': 'West Bengal', 'CYP2C9*2': 'TT', 'CYP2C9*3': 'AA', 'Gender_Clean': 'Male'},
+        {'Sample_ID': 'S4', 'State_Clean': 'Gujarat', 'CYP2C9*2': 'CT', 'CYP2C9*3': 'AC', 'Gender_Clean': 'Female'}
+    ])
+    
+    results = DemographicStratifier.stratify_and_analyze(data, active_gene='CYP2C9')
+    assert results['active_gene'] == 'CYP2C9'
+    assert 'CYP2C9*2' in results['markers']
+    assert 'CYP2C9*3' in results['markers']
+    assert 'snps' in results['regional']['South India']
+    assert 'CYP2C9*2' in results['regional']['South India']['snps']
+    assert 'pgx_summary' in results['regional']['South India']
+    assert 'phenotypes' in results['regional']['South India']['pgx_summary']
