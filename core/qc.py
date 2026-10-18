@@ -107,18 +107,24 @@ class DataQCEngine:
         dynamically from the input dataset.
         """
         df = self.normalize_column_names()
+        df = df.reset_index(drop=True)
         total_input_samples = len(df)
         
         # Ensure Sample_ID column exists
         if 'Sample_ID' not in df.columns:
             df['Sample_ID'] = [f"SAMPLE_{i+1:05d}" for i in range(len(df))]
         
-        sample_ids = self._get_series(df, 'Sample_ID').astype(str).str.strip()
+        raw_sids = self._get_series(df, 'Sample_ID')
+        sample_ids = [
+            str(s).strip() if (pd.notna(s) and str(s).strip() not in ('', 'nan', 'None', 'NAN', 'NULL'))
+            else f"SAMPLE_{i+1:05d}"
+            for i, s in enumerate(raw_sids)
+        ]
         df['Sample_ID'] = sample_ids
         
         # Check duplicates within batch file
         duplicated_in_file = df[df['Sample_ID'].duplicated()]['Sample_ID'].tolist()
-        all_duplicates = list(set(duplicated_in_file))
+        all_duplicates = sorted(list({str(s).strip() for s in duplicated_in_file}), key=lambda x: str(x))
         
         # Clean Gender
         if 'Gender' in df.columns:
@@ -166,7 +172,7 @@ class DataQCEngine:
             is_missing_mask = raw_vals.isna() | raw_str.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN', 'NOT PERFORMED'])
             missing_count = int(is_missing_mask.sum())
             total_missing_calls += missing_count
-            missing_sids = df.loc[is_missing_mask, 'Sample_ID'].tolist()
+            missing_sids = [str(s).strip() for s in df.loc[is_missing_mask, 'Sample_ID'] if pd.notna(s)]
             samples_with_missing_genotypes.update(missing_sids)
 
             # Clean and validate genotypes
@@ -195,7 +201,7 @@ class DataQCEngine:
                 cleaned_vals = raw_vals.apply(clean_genotype)
                 invalid_mask = (~is_missing_mask) & cleaned_vals.isna()
 
-            invalid_samples = df.loc[invalid_mask, 'Sample_ID'].tolist()
+            invalid_samples = [str(s).strip() for s in df.loc[invalid_mask, 'Sample_ID'] if pd.notna(s)]
             invalid_raw_vals = raw_vals.loc[invalid_mask].tolist()
             if invalid_samples:
                 invalid_genotypes_log[col_name] = [
@@ -228,11 +234,11 @@ class DataQCEngine:
             'total_samples': total_input_samples,
             'fully_valid_samples': fully_valid_samples,
             'duplicate_sample_count': len(all_duplicates),
-            'duplicate_sample_ids': all_duplicates,
+            'duplicate_sample_ids': sorted([str(s) for s in all_duplicates], key=lambda x: str(x)),
             'total_missing_genotypes_count': total_missing_calls,
             'overall_missing_pct': overall_missing_pct,
             'samples_with_missing_count': len(samples_with_missing_genotypes),
-            'samples_with_missing_ids': sorted(list(samples_with_missing_genotypes)),
+            'samples_with_missing_ids': sorted([str(s) for s in samples_with_missing_genotypes], key=lambda x: str(x)),
             'invalid_genotypes_count': total_invalid_calls,
             'invalid_genotypes_log': invalid_genotypes_log,
             'snp_qc_stats': snp_qc_stats

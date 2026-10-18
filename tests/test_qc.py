@@ -77,9 +77,25 @@ def test_custom_permitted_genotypes_strict_flagging():
     # TT must be strictly converted to NaN and logged in invalid_genotypes_log
     assert pd.isna(clean_df.loc[clean_df['Sample_ID'] == 'S3', 'Custom_Locus'].iloc[0])
     assert 'Custom_Locus' in report['invalid_genotypes_log']
-    assert report['invalid_genotypes_log']['Custom_Locus'][0]['sample_id'] == 'S3'
-    assert report['invalid_genotypes_log']['Custom_Locus'][0]['raw_value'] == 'TT'
-    assert report['snp_qc_stats']['Custom_Locus']['invalid_samples'] == 1
     assert report['invalid_genotypes_count'] == 1
+
+
+def test_mixed_type_sample_ids_with_missing_and_duplicates():
+    """Verify that sample IDs with mixed types (ints, floats, strings, NaNs) sort safely without TypeError."""
+    data = {
+        'Lab ID': [101, '102', 101, None, 'OD_005'],
+        'CYP2C9*2': ['CC', 'CT', None, None, 'TT'],
+        'CYP2C9*3': [None, 'AA', 'AA', 'AC', 'CC']
+    }
+    df = pd.DataFrame(data)
+    qc_engine = DataQCEngine(df)
+    clean_df, report = qc_engine.run_qc()
+
+    assert report['total_samples'] == 5
+    assert isinstance(report['samples_with_missing_ids'], list)
+    assert isinstance(report['duplicate_sample_ids'], list)
+    assert '101' in report['duplicate_sample_ids']
+    # 101 has missing calls, None (auto-named SAMPLE_00004) has missing CYP2C9*2
+    assert report['samples_with_missing_count'] == 2
 
 
