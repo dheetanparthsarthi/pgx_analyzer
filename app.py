@@ -1342,7 +1342,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
     if not active_markers and 'uploaded_df' in st.session_state and st.session_state['uploaded_df'] is not None:
         active_markers = [c for c in st.session_state['uploaded_df'].columns if ('*' in c or 'rs' in c.lower() or active_gene.lower() in c.lower()) and c not in ('Sample_ID', 'Region', 'Gender', 'State', 'State_Clean', 'Gender_Clean', 'Diplotype', 'Phenotype', 'Activity_Score', 'Test_Requested', 'Date_of_Birth')]
     if not active_markers:
-        active_markers = ['CYP2C9*2', 'CYP2C9*3'] if 'CYP2C9' in str(active_gene).upper() else ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
+        active_markers = get_default_markers_for_gene(active_gene, catalog_df=load_marker_catalog())
 
     tot_samples = qc_report.get('total_samples', ov['sample_count'])
     fully_valid = qc_report.get('fully_valid_samples', ov['sample_count'])
@@ -1518,16 +1518,12 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 return "Variant Allele"
             return "Allele Call"
 
-        snp_display_order = [
-            ('CYP2C19*2', 'rs4244285 (CYP2C19*2, c.681G>A)'),
-            ('CYP2C19*3', 'rs4986893 (CYP2C19*3, c.636G>A)'),
-            ('CYP2C19*17', 'rs12248560 (CYP2C19*17, c.-806C>T)'),
-            ('CYP2C9*2', 'rs1799853 (CYP2C9*2, c.430C>T)'),
-            ('CYP2C9*3', 'rs1057910 (CYP2C9*3, c.1075A>C)')
-        ]
+        snp_display_order = []
         for snp_code in snps_data.keys():
-            if snp_code not in [s[0] for s in snp_display_order]:
-                snp_display_order.append((snp_code, f"{snp_code} Marker"))
+            m_conf = active_snp_conf.get(snp_code, {})
+            rs_id = m_conf.get('rs_id') or m_conf.get('rsid')
+            title = f"{snp_code}" + (f" ({rs_id})" if rs_id and rs_id not in snp_code else "")
+            snp_display_order.append((snp_code, title))
 
         for snp_code, snp_title in snp_display_order:
             if snp_code in snps_data:
@@ -1871,6 +1867,18 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+        else:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown(f"### 📚 Pharmacogenomic Knowledgebase Guidelines & Reference for {active_gene}")
+            st.caption(f"Curated population markers and reference allele frequencies for {active_gene}.")
+            catalog_df = load_marker_catalog()
+            sub_catalog = catalog_df[catalog_df['Gene'].str.upper() == str(active_gene).upper()] if not catalog_df.empty else pd.DataFrame()
+            if not sub_catalog.empty:
+                disp_cat = sub_catalog[['Gene', 'Marker', 'SA MAF', '%', 'MAF', 'Level of evidence', 'PubMed reference']].copy()
+                st.dataframe(disp_cat, use_container_width=True, hide_index=True)
+            else:
+                st.info(f"Target gene {active_gene} analyzed successfully. Refer to CPIC / PharmGKB guidelines for drug dosing recommendations.")
+
 
     # -------------------------------------------------------------------------
     # TAB 6: DATA QUALITY AUDIT
@@ -4342,68 +4350,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         elif st.session_state['workflow_step'] == '4 · Results':
             active_gene = full_results.get('active_gene') or st.session_state.get('selected_gene', 'CYP2C19')
 
-            # Render Full 9-Tab Studio if CYP2C19 or CYP2C9 was selected and analyzed
-            if active_gene in ('CYP2C19', 'CYP2C9'):
-                render_unified_results(full_results, qc_report)
-            else:
-                st.markdown(f"## 📊 Genomic Studio & Biomarker Analysis for {active_gene}")
-                mapped_details = st.session_state.get('mapped_marker_details', {})
-                if df_raw is not None and not df_raw.empty and mapped_details:
-                    st.caption(f"Interactive genotype analysis, allele frequencies, and Hardy-Weinberg equilibrium test for {len(mapped_details)} mapped biomarker(s).")
-
-                    for m_col, m_info in mapped_details.items():
-                        m_label = m_info.get('marker_label', m_info.get('std_name', m_col))
-                        r_al = m_info.get('ref_allele', 'A')
-                        v_al = m_info.get('var_allele', 'G')
-
-                        res = analyze_generic_marker(df_raw[m_col], m_label, ref_al=r_al, var_al=v_al)
-
-                        st.markdown(f"""
-                        <div class="clean-card-box" style="margin-top: 15px; margin-bottom: 10px; border-left: 4px solid #2563EB;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                                <h4 style="margin: 0; color: #0F172A; font-weight: 700;">🧬 {m_label}</h4>
-                                <span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.85rem; font-weight: 600; padding: 3px 12px; border-radius: 9999px;">
-                                    {res.get('interpretation', 'N/A')}
-                                </span>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
-                        k1, k2, k3, k4 = st.columns(4)
-                        k1.metric("Valid Samples", f"{res.get('valid_samples', 0):,}")
-                        k2.metric(f"Ref Allele ({r_al}) Freq", f"{res.get('p', 0.0):.4f}")
-                        k3.metric(f"Var Allele ({v_al}) Freq", f"{res.get('q', 0.0):.4f}")
-                        k4.metric("HWE χ² Stat (p-val)", f"{res.get('hwe_chi2', 0.0):.2f} (p={res.get('hwe_p', 1.0):.4f})")
-
-                        gt_counts = res.get('genotype_counts', {})
-                        if gt_counts:
-                            c_ch1, c_ch2 = st.columns([1.2, 1])
-                            with c_ch1:
-                                fig_bar = px.bar(
-                                    x=list(gt_counts.keys()),
-                                    y=list(gt_counts.values()),
-                                    labels={'x': 'Genotype Call', 'y': 'Sample Count'},
-                                    title=f"Genotype Distribution ({m_label})",
-                                    color_discrete_sequence=['#2563EB']
-                                )
-                                fig_bar.update_layout(height=280, margin=dict(l=20, r=20, t=40, b=20))
-                                st.plotly_chart(fig_bar, use_container_width=True)
-                            with c_ch2:
-                                gt_df = pd.DataFrame([
-                                    {'Genotype': k, 'Count': v, 'Percentage': f"{(v / res['valid_samples'] * 100):.1f}%"}
-                                    for k, v in gt_counts.items()
-                                ])
-                                st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-                                st.dataframe(gt_df, use_container_width=True, hide_index=True)
-
-                st.divider()
-                st.markdown(f"### 📚 Genomic Knowledgebase Markers for {active_gene}")
-                sub_catalog = catalog_df[catalog_df['Gene'].str.upper() == active_gene.upper()] if not catalog_df.empty else pd.DataFrame()
-                if not sub_catalog.empty:
-                    disp_cat = sub_catalog[['Gene', 'Marker', 'SA MAF', '%', 'MAF', 'Level of evidence', 'PubMed reference']].copy()
-                    st.dataframe(disp_cat, use_container_width=True, hide_index=True)
-                else:
-                    st.info(f"No additional markers recorded for {active_gene}.")
+            # Render Full Analytical Platform dynamically for Any Target Gene
+            render_unified_results(full_results, qc_report)
 
             st.divider()
             st.markdown("### Export")
