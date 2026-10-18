@@ -35,9 +35,10 @@ from core.qc import DataQCEngine
 from core.stratification import DemographicStratifier
 from core.stats import GeneticStatsEngine
 from core.cyp2c19 import CYP2C19Translator
+from core.cyp2c9 import CYP2C9Translator
 from database.db_manager import DatabaseManager
 from reports.report_generator import ReportGenerator
-from config import SNP_CONFIG, PHENOTYPE_ORDER, STATE_TO_REGION
+from config import SNP_CONFIG, CYP2C9_SNP_CONFIG, PHENOTYPE_ORDER, CYP2C9_PHENOTYPE_ORDER, STATE_TO_REGION
 
 # -----------------------------------------------------------------------------
 # 1. PAGE CONFIG & CUSTOM CSS
@@ -532,12 +533,14 @@ def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
     cols = list(df.columns)
     
     patterns = {
-        'CYP2C19*2': ['*2', 'cyp2c19*2', 'rs4244285', 'c.681g>a', 'c.681', 'cyp2c19_2', 'cyp2'],
-        'CYP2C19*3': ['*3', 'cyp2c19*3', 'rs4986893', 'c.636g>a', 'c.636', 'cyp2c19_3', 'cyp3'],
+        'CYP2C19*2': ['cyp2c19*2', 'rs4244285', 'c.681g>a', 'c.681', 'cyp2c19_2', 'cyp2'],
+        'CYP2C19*3': ['cyp2c19*3', 'rs4986893', 'c.636g>a', 'c.636', 'cyp2c19_3', 'cyp3'],
         'CYP2C19*17': ['*17', 'cyp2c19*17', 'rs12248560', 'c.-806c>t', 'c.-806', 'cyp2c19_17', 'cyp17'],
-        'Sample_ID': ['sample id', 'sample_id', 'sample', 'patient id', 'patient_id', 'id'],
+        'CYP2C9*2': ['cyp2c9*2', 'rs1799853', 'cyp2c9_2', 'cyp2c9-2', '430c>t'],
+        'CYP2C9*3': ['cyp2c9*3', 'rs1057910', 'cyp2c9_3', 'cyp2c9-3', '1075a>c'],
+        'Sample_ID': ['sample id', 'sample_id', 'sample', 'patient id', 'patient_id', 'lab id', 'id'],
         'Gender': ['gender', 'sex'],
-        'State': ['state', 'region', 'native place', 'native', 'location'],
+        'State': ['state / country', 'state/country', 'state', 'region', 'native place', 'native', 'location'],
         'DOB': ['date of birth', 'dob', 'birth']
     }
     
@@ -815,6 +818,7 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
         ]]
 
     cyp2c19_markers_present = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in processed_df.columns]
+    cyp2c9_markers_present = [c for c in ['CYP2C9*2', 'CYP2C9*3'] if c in processed_df.columns]
 
     if len(cyp2c19_markers_present) >= 2:
         st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
@@ -862,6 +866,20 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
             combo_title = " + ".join(active_snps)
             std_snps_label = f"{len(active_snps)}-Locus Panel"
             rs_label = combo_title
+    elif len(cyp2c9_markers_present) >= 2:
+        st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
+        avail_options = ["CYP2C9 *2 + *3 (c.430C>T / c.1075A>C · Decreased Function Panel)"]
+        variant_combo_choice = st.radio(
+            "Variant Combination:",
+            avail_options,
+            horizontal=True,
+            key="studio_variant_combo_choice_cyp2c9",
+            label_visibility="collapsed"
+        )
+        active_snps = ['CYP2C9*2', 'CYP2C9*3']
+        combo_title = "CYP2C9 *2 + *3"
+        std_snps_label = "c.430C>T & c.1075A>C"
+        rs_label = "rs1799853 + rs1057910"
     elif len(mapped_snps_in_df) >= 1:
         active_snps = mapped_snps_in_df
         combo_title = f"{target_gene} ({' + '.join(active_snps)})"
@@ -1233,6 +1251,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
             st.rerun()
         st.divider()
 
+    active_gene = full_results.get('active_gene') or full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
     ov = full_results['overall']
     tot_samples = qc_report.get('total_samples', ov['sample_count'])
     fully_valid = qc_report.get('fully_valid_samples', ov['sample_count'])
@@ -1247,7 +1266,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
         "🧬 Genotype & Allele", 
         "⚖️ Hardy-Weinberg", 
         "🌐 Population Stratification", 
-        "💊 CYP2C19 Calling",
+        f"💊 {active_gene} Calling",
         "🛡️ Data Quality Audit",
         "🗺️ Geographic Groups",
         "👫 Gender-Wise",
@@ -1319,8 +1338,8 @@ def render_unified_results(full_results: dict, qc_report: dict):
         st.markdown("<br>", unsafe_allow_html=True)
         c_ov1, c_ov2 = st.columns(2)
         with c_ov1:
-            st.markdown("### 🏆 CYP2C19 Phenotype Summary")
-            pgx = ov.get('cyp2c19_summary', {})
+            st.markdown(f"### 🏆 {active_gene} Phenotype Summary")
+            pgx = ov.get('pgx_summary') or ov.get('cyp2c9_summary') or ov.get('cyp2c19_summary', {})
             phe_dict = pgx.get('phenotypes', {})
             phe_df = pd.DataFrame([{'Phenotype Category': k, 'Count': v['count'], 'Percentage': f"{v['percentage']:.1f}%"} for k, v in phe_dict.items() if v['count'] > 0])
             st.table(phe_df)
@@ -1358,8 +1377,9 @@ def render_unified_results(full_results: dict, qc_report: dict):
         sel_key, sel_cohort = render_subcohort_pills("tab_gen")
         snps_data = sel_cohort.get('snps', {})
         
+        active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
         def get_zygosity(gt_name, snp_name):
-            snp_conf = SNP_CONFIG.get(snp_name, {})
+            snp_conf = active_snp_conf.get(snp_name, {})
             wt = snp_conf.get('wildtype_genotype', '')
             het = snp_conf.get('het_genotype', '')
             var = snp_conf.get('hom_var_genotype', '')
@@ -1372,7 +1392,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
             return "Genotype Call"
 
         def get_allele_type(al_name, snp_name):
-            snp_conf = SNP_CONFIG.get(snp_name, {})
+            snp_conf = active_snp_conf.get(snp_name, {})
             ref = snp_conf.get('ref_allele', '')
             var = snp_conf.get('var_allele', '')
             if al_name == ref:
@@ -1384,8 +1404,13 @@ def render_unified_results(full_results: dict, qc_report: dict):
         snp_display_order = [
             ('CYP2C19*2', 'rs4244285 (CYP2C19*2, c.681G>A)'),
             ('CYP2C19*3', 'rs4986893 (CYP2C19*3, c.636G>A)'),
-            ('CYP2C19*17', 'rs12248560 (CYP2C19*17, c.-806C>T)')
+            ('CYP2C19*17', 'rs12248560 (CYP2C19*17, c.-806C>T)'),
+            ('CYP2C9*2', 'rs1799853 (CYP2C9*2, c.430C>T)'),
+            ('CYP2C9*3', 'rs1057910 (CYP2C9*3, c.1075A>C)')
         ]
+        for snp_code in snps_data.keys():
+            if snp_code not in [s[0] for s in snp_display_order]:
+                snp_display_order.append((snp_code, f"{snp_code} Marker"))
 
         for snp_code, snp_title in snp_display_order:
             if snp_code in snps_data:
@@ -1583,7 +1608,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # -------------------------------------------------------------------------
     with tab_pgx:
         sel_key, sel_cohort = render_subcohort_pills("tab_pgx")
-        pgx = sel_cohort.get('cyp2c19_summary', {})
+        pgx = sel_cohort.get('pgx_summary') or sel_cohort.get('cyp2c9_summary') or sel_cohort.get('cyp2c19_summary', {})
         dips = pgx.get('diplotypes', {})
         phenos = pgx.get('phenotypes', {})
 
@@ -1663,6 +1688,71 @@ def render_unified_results(full_results: dict, qc_report: dict):
         # 3. Combination & Geographic Studio
         if view_choice in ["👁️ Show All Views", "🧩 Combination", "🗺️ Geographical & State-Wise Matrices"]:
             render_cyp2c19_combination_studio(processed_df, full_results, view_mode=view_choice)
+
+        # 4. Clinical CPIC Dosing Guidelines
+        if active_gene == 'CYP2C9':
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 💊 CPIC® Clinical Dosing Guidelines for CYP2C9")
+            st.caption("Standardized CPIC level A/B clinical recommendations for narrow therapeutic index substrates.")
+            c_g1, c_g2, c_g3 = st.columns(3)
+            with c_g1:
+                st.markdown("""
+                <div style="background: #FEF3C7; border: 1px solid #F59E0B; border-radius: 8px; padding: 14px;">
+                    <div style="font-weight: 700; color: #92400E; font-size: 14px;">🩸 Warfarin</div>
+                    <div style="font-size: 12px; color: #78350F; margin-top: 6px; line-height: 1.5;">
+                        <b>Normal (*1/*1):</b> Standard starting dose (titrate INR).<br>
+                        <b>Intermediate (*1/*2, *1/*3, *2/*2):</b> Reduce initial dose by 20–50% to prevent supratherapeutic INR and bleeding.<br>
+                        <b>Poor (*2/*3, *3/*3):</b> Reduce dose by 50–80% or consider alternative oral anticoagulant (e.g., DOAC).
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            with c_g2:
+                st.markdown("""
+                <div style="background: #EFF6FF; border: 1px solid #3B82F6; border-radius: 8px; padding: 14px;">
+                    <div style="font-weight: 700; color: #1E40AF; font-size: 14px;">🧠 Phenytoin</div>
+                    <div style="font-size: 12px; color: #1E3A8A; margin-top: 6px; line-height: 1.5;">
+                        <b>Normal (*1/*1):</b> Standard starting dose (300 mg/day).<br>
+                        <b>Intermediate (*1/*2, *1/*3, *2/*2):</b> Reduce initial maintenance dose by 25% to prevent neurotoxicity.<br>
+                        <b>Poor (*2/*3, *3/*3):</b> Reduce initial maintenance dose by 50% and closely monitor serum trough.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            with c_g3:
+                st.markdown("""
+                <div style="background: #ECFDF5; border: 1px solid #10B981; border-radius: 8px; padding: 14px;">
+                    <div style="font-weight: 700; color: #065F46; font-size: 14px;">🩹 Celecoxib</div>
+                    <div style="font-size: 12px; color: #064E3B; margin-top: 6px; line-height: 1.5;">
+                        <b>Normal (*1/*1):</b> Standard starting dose (200 mg/day).<br>
+                        <b>Intermediate (*1/*2, *1/*3, *2/*2):</b> Standard dose with cautious clinical titration.<br>
+                        <b>Poor (*2/*3, *3/*3):</b> Reduce initial dose by 50% to prevent prolonged exposure and toxicity.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        elif active_gene == 'CYP2C19':
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 💊 CPIC® Clinical Dosing Guidelines for CYP2C19")
+            st.caption("Standardized CPIC level A/B clinical recommendations for antiplatelet and psychiatric therapies.")
+            c_g1, c_g2 = st.columns(2)
+            with c_g1:
+                st.markdown("""
+                <div style="background: #EFF6FF; border: 1px solid #3B82F6; border-radius: 8px; padding: 14px;">
+                    <div style="font-weight: 700; color: #1E40AF; font-size: 14px;">🩸 Clopidogrel (Plavix)</div>
+                    <div style="font-size: 12px; color: #1E3A8A; margin-top: 6px; line-height: 1.5;">
+                        <b>Normal (*1/*1) & Rapid (*1/*17):</b> Standard dose (75 mg/day).<br>
+                        <b>Intermediate (*1/*2, *1/*3) & Poor (*2/*2, *2/*3, *3/*3):</b> Avoid clopidogrel; prescribe alternative antiplatelet (Prasugrel, Ticagrelor) due to reduced active metabolite and high stent thrombosis risk.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            with c_g2:
+                st.markdown("""
+                <div style="background: #FDF2F8; border: 1px solid #EC4899; border-radius: 8px; padding: 14px;">
+                    <div style="font-weight: 700; color: #9D174D; font-size: 14px;">💊 Voriconazole & Escitalopram</div>
+                    <div style="font-size: 12px; color: #831843; margin-top: 6px; line-height: 1.5;">
+                        <b>Voriconazole:</b> In Poor Metabolizers, select alternative antifungal (Isavuconazole) to prevent neurotoxicity.<br>
+                        <b>Escitalopram:</b> In Poor Metabolizers, reduce starting dose by 50% to avoid QT prolongation.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
     # TAB 6: DATA QUALITY AUDIT
@@ -2157,6 +2247,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             with c_g2:
                 if sel_gene == 'CYP2C19':
                     base_markers = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                elif sel_gene == 'CYP2C9':
+                    base_markers = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
                 else:
                     raw_ms = catalog_df[catalog_df['Gene'] == sel_gene]['Marker'].tolist() if not catalog_df.empty else []
                     base_markers = raw_ms if raw_ms else [f"{sel_gene}_marker1"]
@@ -2277,6 +2369,35 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             </div>
             """, unsafe_allow_html=True)
 
+            # Quick Load Button for New Dataset (CYP2C9 709 Genotyped Patients)
+            new_dataset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "New Microsoft Excel Worksheet.xlsx")
+            if os.path.exists(new_dataset_path):
+                st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
+                c_ql_btn, c_ql_info = st.columns([1.2, 1.8])
+                with c_ql_btn:
+                    if st.button("⚡ Quick Load: CYP2C9 Dataset (709 Patients)", type="primary", use_container_width=True, key="btn_quick_load_new_dataset"):
+                        df_sheet2 = pd.read_excel(new_dataset_path, sheet_name="Sheet2")
+                        chk_res = inspect_uploaded_file(df_sheet2)
+                        clear_deletion_flag()
+                        st.session_state['selected_gene'] = 'CYP2C9'
+                        st.session_state['selected_markers'] = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
+                        st.session_state['last_uploaded_file_id'] = f"new_dataset_{os.path.getsize(new_dataset_path)}"
+                        st.session_state['uploaded_df'] = df_sheet2
+                        st.session_state['datasets_dict'] = {"CYP2C9 Clinical Cohort (Sheet2 - 709 Patients)": df_sheet2}
+                        st.session_state['upload_error'] = None
+                        st.session_state['upload_inspection'] = chk_res
+                        st.session_state['demographic_mapping'] = {
+                            'Sample_ID': chk_res['sample_id_col'],
+                            'Gender': chk_res['gender_col'],
+                            'State': chk_res['state_col']
+                        }
+                        save_active_dataset(df_sheet2)
+                        st.session_state['workflow_step'] = '3 · Map columns'
+                        st.success("✅ Loaded CYP2C9 Dataset from Sheet2 (709 genotyped patients)!")
+                        st.rerun()
+                with c_ql_info:
+                    st.caption("🚀 **1-Click Quick Load:** Automatically loads `New Microsoft Excel Worksheet.xlsx` (Sheet2 with 709 genotyped patients for CYP2C9*2 & *3) and configures target mapping.")
+
             # Display active workspace status if data is loaded
             if has_active_data():
                 c_status, c_act1, c_down_top, c_act2 = st.columns([1.1, 0.7, 0.7, 0.5])
@@ -2309,7 +2430,24 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if file_upload.name.lower().endswith('.csv'):
                             df_load = pd.read_csv(file_bytes)
                         else:
-                            df_load = pd.read_excel(file_bytes)
+                            excel_file = pd.ExcelFile(file_bytes)
+                            sheet_names = excel_file.sheet_names
+                            if len(sheet_names) > 1:
+                                best_sheet = sheet_names[0]
+                                max_density = -1
+                                for s in sheet_names:
+                                    s_df = pd.read_excel(excel_file, sheet_name=s)
+                                    gt_cols = [c for c in s_df.columns if any(k in str(c).lower() for k in ['*2', '*3', '*17', 'cyp', 'rs', 'snp', 'marker', 'gene'])]
+                                    score = int(s_df[gt_cols].notna().sum().sum()) if gt_cols else int(s_df.notna().sum().sum())
+                                    if score > max_density:
+                                        max_density = score
+                                        best_sheet = s
+                                df_load = pd.read_excel(excel_file, sheet_name=best_sheet)
+                                st.session_state['uploaded_sheet_names'] = sheet_names
+                                st.session_state['active_sheet_name'] = best_sheet
+                                st.session_state['uploaded_excel_bytes'] = file_upload.getvalue()
+                            else:
+                                df_load = pd.read_excel(file_bytes)
                         
                         # POST-UPLOAD INSPECTION FOR COMPULSORY FIELDS
                         chk_res = inspect_uploaded_file(df_load)
@@ -2345,6 +2483,28 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 st.rerun()
                     except Exception as e:
                         st.error(f"Error loading file: {e}")
+
+            # Multi-Sheet Switcher if uploaded workbook has multiple sheets
+            if len(st.session_state.get('uploaded_sheet_names', [])) > 1 and st.session_state.get('uploaded_excel_bytes'):
+                all_sheets = st.session_state['uploaded_sheet_names']
+                cur_s = st.session_state.get('active_sheet_name', all_sheets[0])
+                s_idx = all_sheets.index(cur_s) if cur_s in all_sheets else 0
+                c_sh1, c_sh2 = st.columns([1.2, 1.8])
+                with c_sh1:
+                    sel_s = st.selectbox("📑 Multi-Sheet Detected — Switch Active Sheet:", all_sheets, index=s_idx, key="sel_active_excel_sheet")
+                    if sel_s != cur_s:
+                        st.session_state['active_sheet_name'] = sel_s
+                        new_df = pd.read_excel(io.BytesIO(st.session_state['uploaded_excel_bytes']), sheet_name=sel_s)
+                        chk_res = inspect_uploaded_file(new_df)
+                        st.session_state['uploaded_df'] = new_df
+                        st.session_state['upload_inspection'] = chk_res
+                        st.session_state['demographic_mapping'] = {
+                            'Sample_ID': chk_res['sample_id_col'],
+                            'Gender': chk_res['gender_col'],
+                            'State': chk_res['state_col']
+                        }
+                        save_active_dataset(new_df)
+                        st.rerun()
 
             # Show Error Banner if Sample ID Missing
             if st.session_state.get('upload_error'):
@@ -2614,6 +2774,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 # Dynamic list of markers for the chosen gene
                 if sel_map_gene == 'CYP2C19':
                     base_markers = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                elif sel_map_gene == 'CYP2C9':
+                    base_markers = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
                 else:
                     raw_ms = catalog_df[catalog_df['Gene'] == sel_map_gene]['Marker'].tolist() if not catalog_df.empty else []
                     base_markers = raw_ms if raw_ms else [f"{sel_map_gene}_marker1"]
@@ -3792,10 +3954,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         # STEP 4: RESULTS (GENE & BIOMARKER INTERACTIVE VISUALIZATION STUDIO)
         # -------------------------------------------------------------------------
         elif st.session_state['workflow_step'] == '4 · Results':
-            active_gene = st.session_state.get('selected_gene', 'CYP2C19')
+            active_gene = full_results.get('active_gene') or st.session_state.get('selected_gene', 'CYP2C19')
 
-            # Render Full 9-Tab Studio if CYP2C19 was selected and analyzed
-            if active_gene == 'CYP2C19':
+            # Render Full 9-Tab Studio if CYP2C19 or CYP2C9 was selected and analyzed
+            if active_gene in ('CYP2C19', 'CYP2C9'):
                 render_unified_results(full_results, qc_report)
             else:
                 st.markdown(f"## 📊 Genomic Studio & Biomarker Analysis for {active_gene}")

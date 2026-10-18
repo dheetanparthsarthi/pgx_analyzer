@@ -9,7 +9,7 @@ from scipy import stats
 from typing import Dict, Any, Optional
 import math
 
-from config import SNP_CONFIG, ALPHA_SIGNIFICANCE
+from config import SNP_CONFIG, CYP2C9_SNP_CONFIG, ALPHA_SIGNIFICANCE
 
 
 class GeneticStatsEngine:
@@ -37,8 +37,8 @@ class GeneticStatsEngine:
             n_aa_h = (n_a - h) // 2
             if n_AA_h < 0 or n_aa_h < 0:
                 return 0.0
-            # log probability via log gamma/fact
-            log_p = (math.lgamma(n + 1) + math.lgamma(n_A + 1) + math.lgamma(n_a + 1) + math.lgamma(2*n - n_A - n_a + 1) 
+            # log probability via log gamma/factorial: (N! * 2^h / (n_AA! * h! * n_aa!)) * (n_A! * n_a! / (2N)!)
+            log_p = (math.lgamma(n + 1) + math.lgamma(n_A + 1) + math.lgamma(n_a + 1) + (h * math.log(2.0))
                      - (math.lgamma(2*n + 1) + math.lgamma(n_AA_h + 1) + math.lgamma(h + 1) + math.lgamma(n_aa_h + 1)))
             return math.exp(log_p)
 
@@ -54,20 +54,32 @@ class GeneticStatsEngine:
         return min(1.0, p_val)
 
     @classmethod
-    def analyze_snp(cls, series: pd.Series, snp_name: str) -> Dict[str, Any]:
+    def analyze_snp(cls, series: pd.Series, snp_name: str, custom_info: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Performs full Genotype, Allele, and HWE analysis for a single SNP column.
+        Supports CYP2C19, CYP2C9, and generic/custom markers.
         """
         clean_series = series.dropna().astype(str).str.strip().str.upper()
+        clean_series = clean_series[~clean_series.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
         n_valid = len(clean_series)
         
-        snp_info = SNP_CONFIG.get(snp_name, {
-            'ref_allele': 'A',
-            'var_allele': 'B',
-            'wildtype_genotype': 'AA',
-            'het_genotype': 'AB',
-            'hom_var_genotype': 'BB'
-        })
+        all_configs = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
+        snp_info = custom_info or all_configs.get(snp_name, None)
+        
+        if not snp_info:
+            # Dynamically infer alleles if not pre-configured
+            counts = clean_series.value_counts()
+            alleles = set("".join(counts.index.tolist()))
+            alleles = [a for a in alleles if a.isalpha()]
+            ref = alleles[0] if len(alleles) > 0 else 'A'
+            var = alleles[1] if len(alleles) > 1 else 'G'
+            snp_info = {
+                'ref_allele': ref,
+                'var_allele': var,
+                'wildtype_genotype': f"{ref}{ref}",
+                'het_genotype': f"{ref}{var}",
+                'hom_var_genotype': f"{var}{var}"
+            }
         
         ref_allele = snp_info['ref_allele']
         var_allele = snp_info['var_allele']
