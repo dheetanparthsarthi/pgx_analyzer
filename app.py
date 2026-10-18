@@ -562,17 +562,28 @@ from core.gene_utils import KNOWN_PGX_GENES, get_column_gene, detect_genes_in_co
 def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: pd.DataFrame = None):
     """Sets active target gene and its markers across session state and synchronizes all widget keys."""
     gene_u = str(gene_symbol).strip().upper() if gene_symbol else None
-    if markers is None:
-        markers = get_default_markers_for_gene(gene_u, catalog_df) if gene_u else []
+    if markers is None and gene_u:
+        def_m = get_default_markers_for_gene(gene_u, catalog_df)
+        up_df = st.session_state.get('uploaded_df')
+        if up_df is not None and not up_df.empty:
+            matched_m = [m for m in def_m if find_best_column_match(m, m.split(' ')[0], gene_u, list(up_df.columns))]
+            markers = matched_m if matched_m else def_m
+        else:
+            markers = def_m
+    elif markers is None:
+        markers = []
+
     st.session_state['selected_gene'] = gene_u
     st.session_state['selected_markers'] = list(markers)
+    st.session_state['extra_mapping_rows'] = []
+
     # Clear stale widget keys so dropdowns cleanly re-initialize to the new target
     for k in ['step1_sel_gene', 'step1_sel_markers', 'map_step_gene_sel', 'map_step_marker_sel']:
         if k in st.session_state:
             del st.session_state[k]
-    # Clear old column mapping keys
+    # Clear old column mapping keys and trackers
     for k in list(st.session_state.keys()):
-        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
+        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_', '_mapped_', '_col_tracker_')):
             del st.session_state[k]
 
 def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -2363,7 +2374,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 sel_gene_choice = st.selectbox("1️⃣ Select Target Gene:", gene_options, index=g_idx, key="step1_sel_gene")
                 if sel_gene_choice != "(Select Target Gene)":
                     if sel_gene_choice != st.session_state.get('selected_gene'):
-                        set_active_target_gene(sel_gene_choice, markers=[], catalog_df=catalog_df)
+                        set_active_target_gene(sel_gene_choice, markers=None, catalog_df=catalog_df)
                         st.rerun()
                 else:
                     if st.session_state.get('selected_gene') is not None:
@@ -2382,6 +2393,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                     curr_selected = st.session_state.get('selected_markers', [])
                     valid_defaults = [m for m in curr_selected if m in available_markers]
+                    if not valid_defaults:
+                        valid_defaults = list(available_markers)
+                        st.session_state['selected_markers'] = valid_defaults
 
                     c_btn_m1, c_btn_m2, _ = st.columns([0.3, 0.3, 0.4])
                     with c_btn_m1:
@@ -2408,7 +2422,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         key="step1_sel_markers",
                         placeholder="Choose biomarkers to analyze or click 'Select All'"
                     )
-                    st.session_state['selected_markers'] = sel_markers
+                    if sel_markers != st.session_state.get('selected_markers'):
+                        st.session_state['selected_markers'] = sel_markers
+                        for k in list(st.session_state.keys()):
+                            if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', '_mapped_', '_col_tracker_')):
+                                del st.session_state[k]
                 else:
                     st.info("👆 Please select a target gene to configure biomarkers, or proceed to **2 · Upload** to upload your dataset and auto-detect your target gene.")
 
@@ -2590,14 +2608,20 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 st.session_state['mapped_cols'] = {}
                                 save_active_dataset(df_load)
 
-                                # Auto-detect target gene and present markers directly from uploaded file columns
+                                # Auto-detect target gene ONLY if user has not explicitly selected one
                                 detected_file_genes = detect_genes_in_columns(df_load.columns)
-                                if detected_file_genes:
+                                curr_g = st.session_state.get('selected_gene')
+                                if not curr_g and detected_file_genes:
                                     primary_g = detected_file_genes[0]
                                     all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
                                     matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(df_load.columns))]
                                     chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
                                     set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
+                                elif curr_g:
+                                    all_g_markers = get_default_markers_for_gene(curr_g, catalog_df)
+                                    matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], curr_g, list(df_load.columns))]
+                                    if matched_f_markers:
+                                        st.session_state['selected_markers'] = matched_f_markers
 
                                 st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns).")
                                 st.rerun()
@@ -2624,12 +2648,18 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             'State': chk_res['state_col']
                         }
                         detected_file_genes = detect_genes_in_columns(new_df.columns)
-                        if detected_file_genes:
+                        curr_g = st.session_state.get('selected_gene')
+                        if not curr_g and detected_file_genes:
                             primary_g = detected_file_genes[0]
                             all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
                             matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(new_df.columns))]
                             chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
                             set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
+                        elif curr_g:
+                            all_g_markers = get_default_markers_for_gene(curr_g, catalog_df)
+                            matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], curr_g, list(new_df.columns))]
+                            if matched_f_markers:
+                                st.session_state['selected_markers'] = matched_f_markers
                         save_active_dataset(new_df)
                         st.rerun()
 
@@ -2711,24 +2741,19 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 target_markers_active = st.session_state.get('selected_markers', [])
 
-                # Auto-heal target gene if selected markers belong to a different gene
-                if target_markers_active:
-                    m_genes = []
-                    for m in target_markers_active:
-                        dg = detect_genes_in_columns([m])
-                        if dg:
-                            m_genes.extend(dg)
-                    if m_genes and all(g.upper() == m_genes[0].upper() for g in m_genes):
-                        inferred_gene = m_genes[0]
-                        if not target_gene_active or target_gene_active.upper() != inferred_gene.upper():
-                            set_active_target_gene(inferred_gene, markers=target_markers_active, catalog_df=catalog_df)
-                            target_gene_active = inferred_gene
-
-                if target_gene_active and not target_markers_active:
+                # Ensure selected markers belong to target_gene_active and match uploaded columns
+                if target_gene_active:
                     all_g_markers = get_default_markers_for_gene(target_gene_active, catalog_df)
-                    matched_f = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], target_gene_active, raw_cols)]
-                    target_markers_active = matched_f if matched_f else all_g_markers
-                    st.session_state['selected_markers'] = target_markers_active
+                    custom_m = st.session_state.get('custom_markers', {}).get(target_gene_active, [])
+                    valid_m = all_g_markers + custom_m
+                    filtered_markers = [m for m in target_markers_active if any(m == vm or m.split(' ')[0] == vm.split(' ')[0] for vm in valid_m)]
+                    if not filtered_markers:
+                        matched_f = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], target_gene_active, raw_cols)]
+                        target_markers_active = matched_f if matched_f else all_g_markers
+                        st.session_state['selected_markers'] = target_markers_active
+                    else:
+                        target_markers_active = filtered_markers
+                        st.session_state['selected_markers'] = target_markers_active
 
                 st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
                 st.markdown("#### 🎯 Target Biomarker & Header Audit")
@@ -2984,7 +3009,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 sel_map_gene_choice = st.selectbox("1️⃣ Select Target Gene:", gene_options, index=g_idx, key="map_step_gene_sel")
                 if sel_map_gene_choice != "(Select Target Gene)":
                     if sel_map_gene_choice != st.session_state.get('selected_gene'):
-                        set_active_target_gene(sel_map_gene_choice, markers=[], catalog_df=catalog_df)
+                        set_active_target_gene(sel_map_gene_choice, markers=None, catalog_df=catalog_df)
                         st.rerun()
                 else:
                     if st.session_state.get('selected_gene') is not None:
@@ -3003,6 +3028,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                     curr_selected = st.session_state.get('selected_markers', [])
                     valid_defaults = [m for m in curr_selected if m in available_markers]
+                    if not valid_defaults:
+                        valid_defaults = list(available_markers)
+                        st.session_state['selected_markers'] = valid_defaults
 
                     c_btn_m1, c_btn_m2, _ = st.columns([0.3, 0.3, 0.4])
                     with c_btn_m1:
@@ -3029,7 +3057,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         key="map_step_marker_sel",
                         placeholder="Choose biomarkers to analyze or click 'Select All'"
                     )
-                    st.session_state['selected_markers'] = sel_map_markers
+                    if sel_map_markers != st.session_state.get('selected_markers'):
+                        st.session_state['selected_markers'] = sel_map_markers
+                        for k in list(st.session_state.keys()):
+                            if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', '_mapped_', '_col_tracker_')):
+                                del st.session_state[k]
                 else:
                     sel_map_markers = []
                     st.info("👆 Please select a target gene to configure biomarkers.")
@@ -3389,6 +3421,15 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         ref_key = f"w_map_ref_{idx}"
                         var_key = f"w_map_var_{idx}"
                         perm_key = f"w_map_perm_{idx}"
+                        tracker_key = f"_mapped_tracker_{idx}"
+                        col_tracker_key = f"_col_tracker_{idx}"
+
+                        # If marker at this index changed (e.g. user switched gene or marker selection), reset stale keys
+                        if st.session_state.get(tracker_key) != marker_label:
+                            for k in [col_key, name_key, ref_key, var_key, perm_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}", f"custom_ref_in_{idx}", f"custom_var_in_{idx}", col_tracker_key]:
+                                if k in st.session_state:
+                                    del st.session_state[k]
+                            st.session_state[tracker_key] = marker_label
 
                         # Determine best matching column
                         best_match = find_best_column_match(marker_label, marker_label.split(' ')[0], sel_map_gene, col_options)
@@ -3396,6 +3437,15 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.session_state[col_key] = best_match if (best_match and best_match in col_options) else "(Select Column)"
 
                         sel_col = st.session_state[col_key]
+
+                        # Check if user changed the column selection in the dropdown
+                        if col_tracker_key in st.session_state and st.session_state[col_tracker_key] != sel_col:
+                            for k in [ref_key, var_key, perm_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}", f"custom_ref_in_{idx}", f"custom_var_in_{idx}"]:
+                                if k in st.session_state:
+                                    del st.session_state[k]
+                            st.session_state[col_tracker_key] = sel_col
+                        else:
+                            st.session_state[col_tracker_key] = sel_col
 
                         # Live Data Inspection for this column
                         observed_counts = {}
@@ -3509,6 +3559,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             if new_sel_col != sel_col:
                                 sel_col = new_sel_col
                                 st.session_state[col_key] = new_sel_col
+                                for k in [ref_key, var_key, perm_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}", f"custom_ref_in_{idx}", f"custom_var_in_{idx}"]:
+                                    if k in st.session_state:
+                                        del st.session_state[k]
+                                st.session_state[col_tracker_key] = new_sel_col
                                 st.rerun()
                         with c_top3:
                             st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
@@ -3932,11 +3986,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     editor_data = []
                     for m_idx, marker_label in enumerate(sel_map_markers):
                         s_name, d_ref, d_var, d_perm, _, _ = get_marker_defaults(marker_label, sel_map_gene)
-                        cur_c = st.session_state.get(f"w_map_col_{m_idx}", find_best_column_match(marker_label, s_name, sel_map_gene, col_options))
-                        cur_r = st.session_state.get(f"w_map_ref_{m_idx}", d_ref)
-                        cur_v = st.session_state.get(f"w_map_var_{m_idx}", d_var)
-                        cur_p = st.session_state.get(f"w_map_perm_{m_idx}", d_perm)
-                        cur_n = st.session_state.get(f"w_map_name_{m_idx}", s_name)
+                        is_stale = (st.session_state.get(f"_mapped_tracker_{m_idx}") != marker_label)
+                        cur_c = find_best_column_match(marker_label, s_name, sel_map_gene, col_options) if is_stale else st.session_state.get(f"w_map_col_{m_idx}", find_best_column_match(marker_label, s_name, sel_map_gene, col_options))
+                        cur_r = d_ref if is_stale else st.session_state.get(f"w_map_ref_{m_idx}", d_ref)
+                        cur_v = d_var if is_stale else st.session_state.get(f"w_map_var_{m_idx}", d_var)
+                        cur_p = d_perm if is_stale else st.session_state.get(f"w_map_perm_{m_idx}", d_perm)
+                        cur_n = s_name if is_stale else st.session_state.get(f"w_map_name_{m_idx}", s_name)
                         editor_data.append({
                             'Marker Name': cur_n,
                             'Spreadsheet Column': cur_c if (cur_c and cur_c in col_options) else "(Select Column)",
