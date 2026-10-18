@@ -2365,9 +2365,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             curr_gene = st.session_state.get('selected_gene')
             g_idx = gene_options.index(curr_gene) if (curr_gene and curr_gene in gene_options) else 0
 
-            if 'step1_sel_gene' in st.session_state:
-                if st.session_state['step1_sel_gene'] not in gene_options or (curr_gene and st.session_state['step1_sel_gene'] != curr_gene):
-                    del st.session_state['step1_sel_gene']
+            if 'step1_sel_gene' in st.session_state and st.session_state['step1_sel_gene'] not in gene_options:
+                del st.session_state['step1_sel_gene']
 
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:
@@ -3000,9 +2999,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             curr_gene = st.session_state.get('selected_gene')
             g_idx = gene_options.index(curr_gene) if (curr_gene and curr_gene in gene_options) else 0
 
-            if 'map_step_gene_sel' in st.session_state:
-                if st.session_state['map_step_gene_sel'] not in gene_options or (curr_gene and st.session_state['map_step_gene_sel'] != curr_gene):
-                    del st.session_state['map_step_gene_sel']
+            if 'map_step_gene_sel' in st.session_state and st.session_state['map_step_gene_sel'] not in gene_options:
+                del st.session_state['map_step_gene_sel']
 
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:

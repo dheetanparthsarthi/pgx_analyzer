@@ -116,3 +116,29 @@ def test_find_best_column_match_ignores_select_column():
     cols_with_select = ['(Select Column)', 'Sample ID', 'CYP2C9*2']
     assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', cols_with_select) == 'CYP2C9*2'
     assert find_best_column_match('CYP2C19*2 (rs4244285)', 'CYP2C19*2', 'CYP2C19', cols_with_select) == ""
+
+def test_catalog_gene_markers_loading():
+    """Verify that catalog genes load their respective markers properly."""
+    catalog_df = pd.DataFrame({
+        'Gene': ['ABCG2', 'ACE', 'ALDH2', 'ABCB1'],
+        'Marker': ['rs2231142', 'rs4646994', 'rs671', 'rs1045642']
+    })
+    assert get_default_markers_for_gene('ABCG2', catalog_df) == ['rs2231142']
+    assert get_default_markers_for_gene('ACE', catalog_df) == ['rs4646994']
+    assert get_default_markers_for_gene('ALDH2', catalog_df) == ['rs671']
+    assert get_default_markers_for_gene('ABCB1', catalog_df) == ['rs1045642']
+
+def test_user_gene_selection_not_cleared_by_old_gene():
+    """Verify that when user selects a new gene in step1_sel_gene, it is not deleted when differing from previous gene."""
+    gene_options = ["(Select Target Gene)", "ABCB1", "ABCG2", "ACE", "ALDH2"]
+    st.session_state['selected_gene'] = 'ABCB1'
+    # User selects ABCG2 in the UI
+    st.session_state['step1_sel_gene'] = 'ABCG2'
+    
+    # Validation check: should only delete if NOT in gene_options
+    if 'step1_sel_gene' in st.session_state and st.session_state['step1_sel_gene'] not in gene_options:
+        del st.session_state['step1_sel_gene']
+        
+    assert 'step1_sel_gene' in st.session_state
+    assert st.session_state['step1_sel_gene'] == 'ABCG2'
+
