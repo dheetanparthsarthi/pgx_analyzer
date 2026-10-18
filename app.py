@@ -2262,9 +2262,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     if m not in available_markers:
                         available_markers.append(m)
 
-                curr_selected = st.session_state.get('selected_markers', [])
-                valid_defaults = [m for m in curr_selected if m in available_markers]
-                if not valid_defaults:
+                curr_selected = st.session_state.get('selected_markers')
+                if curr_selected is not None:
+                    valid_defaults = [m for m in curr_selected if m in available_markers]
+                else:
                     valid_defaults = available_markers
 
                 sel_markers = st.multiselect(
@@ -2372,34 +2373,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             </div>
             """, unsafe_allow_html=True)
 
-            # Quick Load Button for New Dataset (CYP2C9 709 Genotyped Patients)
-            new_dataset_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "New Microsoft Excel Worksheet.xlsx")
-            if os.path.exists(new_dataset_path):
-                st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
-                c_ql_btn, c_ql_info = st.columns([1.2, 1.8])
-                with c_ql_btn:
-                    if st.button("⚡ Quick Load: CYP2C9 Dataset (709 Patients)", type="primary", use_container_width=True, key="btn_quick_load_new_dataset"):
-                        df_sheet2 = pd.read_excel(new_dataset_path, sheet_name="Sheet2")
-                        chk_res = inspect_uploaded_file(df_sheet2)
-                        clear_deletion_flag()
-                        st.session_state['selected_gene'] = 'CYP2C9'
-                        st.session_state['selected_markers'] = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
-                        st.session_state['last_uploaded_file_id'] = f"new_dataset_{os.path.getsize(new_dataset_path)}"
-                        st.session_state['uploaded_df'] = df_sheet2
-                        st.session_state['datasets_dict'] = {"CYP2C9 Clinical Cohort (Sheet2 - 709 Patients)": df_sheet2}
-                        st.session_state['upload_error'] = None
-                        st.session_state['upload_inspection'] = chk_res
-                        st.session_state['demographic_mapping'] = {
-                            'Sample_ID': chk_res['sample_id_col'],
-                            'Gender': chk_res['gender_col'],
-                            'State': chk_res['state_col']
-                        }
-                        save_active_dataset(df_sheet2)
-                        st.session_state['workflow_step'] = '3 · Map columns'
-                        st.success("✅ Loaded CYP2C9 Dataset from Sheet2 (709 genotyped patients)!")
-                        st.rerun()
-                with c_ql_info:
-                    st.caption("🚀 **1-Click Quick Load:** Automatically loads `New Microsoft Excel Worksheet.xlsx` (Sheet2 with 709 genotyped patients for CYP2C9*2 & *3) and configures target mapping.")
 
             # Display active workspace status if data is loaded
             if has_active_data():
@@ -2790,9 +2763,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         available_markers.append(m)
 
                 # Ensure default selections
-                curr_selected = st.session_state.get('selected_markers', [])
-                valid_defaults = [m for m in curr_selected if m in available_markers]
-                if not valid_defaults:
+                curr_selected = st.session_state.get('selected_markers')
+                if curr_selected is not None:
+                    valid_defaults = [m for m in curr_selected if m in available_markers]
+                else:
                     valid_defaults = available_markers
 
                 sel_map_markers = st.multiselect(
@@ -2974,12 +2948,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     # 4. Fallback to find_default
                     return find_default([marker_label, std_name], cols)
 
-                def get_marker_defaults(marker_label: str, sel_gene: str, detected_calls: list = None):
+                def get_marker_defaults(marker_label: str, sel_gene: str, detected_calls: list = None, col_name: str = ""):
                     """
-                    Intelligently determines defaults for a marker.
-                    Prioritizes standard biological definitions for catalog PGx markers,
-                    adapting permitted calls if cohort contains a valid subset (e.g. only CC and CT).
-                    For custom markers, infers alleles from detected data.
+                    Generates clean, user-driven biomarker configuration without hardcoding.
+                    Permitted genotypes are NOT pre-filled with catalog assumptions,
+                    leaving full flexibility to the user to type or click observed genotypes.
                     """
                     clean_label = str(marker_label).strip()
                     if ' ' in clean_label and '(' in clean_label:
@@ -2987,53 +2960,23 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     else:
                         base_name = clean_label
 
-                    norm_lbl = clean_label.lower().replace(" ", "").replace("_", "").replace("-", "")
-                    norm_gene = sel_gene.upper().strip()
-
-                    catalog_rule = None
-                    if norm_gene == 'CYP2C19':
-                        if "*2" in norm_lbl or "rs4244285" in norm_lbl:
-                            catalog_rule = ('CYP2C19*2', 'G', 'A', 'GA, GG, AA', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>A</b>")
-                        elif "*3" in norm_lbl or "rs4986893" in norm_lbl:
-                            catalog_rule = ('CYP2C19*3', 'G', 'None', 'GG', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>None</b> (or A)")
-                        elif "*17" in norm_lbl or "rs12248560" in norm_lbl:
-                            catalog_rule = ('CYP2C19*17', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
-                    elif norm_gene == 'CYP2C9':
-                        if "*2" in norm_lbl or "rs1799853" in norm_lbl:
-                            catalog_rule = ('CYP2C9*2', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
-                        elif "*3" in norm_lbl or "rs1057910" in norm_lbl:
-                            catalog_rule = ('CYP2C9*3', 'A', 'C', 'AA, AC, CC', "PGx Standard", "Standard biological alleles: Ref: <b>A</b>, Var: <b>C</b>")
-                    elif norm_gene == 'VKORC1':
-                        if "1639" in norm_lbl or "rs9923231" in norm_lbl or "*2" in norm_lbl:
-                            catalog_rule = ('VKORC1-1639G>A', 'G', 'A', 'GG, GA, AA', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>A</b>")
-                    elif norm_gene == 'CYP2D6':
-                        if "*4" in norm_lbl or "rs3892097" in norm_lbl:
-                            catalog_rule = ('CYP2D6*4', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
-                        elif "*10" in norm_lbl or "rs1065852" in norm_lbl:
-                            catalog_rule = ('CYP2D6*10', 'C', 'T', 'CC, CT, TT', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>T</b>")
-                    elif norm_gene == 'DPYD':
-                        if "*2a" in norm_lbl or "rs3918290" in norm_lbl:
-                            catalog_rule = ('DPYD*2A', 'G', 'A', 'GG, GA, AA', "PGx Standard", "Standard biological alleles: Ref: <b>G</b>, Var: <b>A</b>")
-                        elif "*13" in norm_lbl or "rs55886062" in norm_lbl:
-                            catalog_rule = ('DPYD*13', 'C', 'G', 'CC, CG, GG', "PGx Standard", "Standard biological alleles: Ref: <b>C</b>, Var: <b>G</b>")
-
-                    if catalog_rule:
-                        cat_name, cat_ref, cat_var, cat_perm, cat_s, cat_d = catalog_rule
-                        # If detected calls are biologically compatible with this marker's alleles, adapt permitted list to observed calls
-                        if detected_calls and len(detected_calls) > 0:
-                            det_nucs = {ch for c in detected_calls for ch in str(c).upper() if ch in 'ACGT'}
-                            expected_nucs = {cat_ref} | ({cat_var} if cat_var != 'None' else set())
-                            if det_nucs.issubset(expected_nucs):
-                                return cat_name, cat_ref, cat_var, ", ".join(detected_calls), f"Observed: {', '.join(detected_calls)}", f"Auto-configured from dataset: <b>{', '.join(detected_calls)}</b> | Standard Ref: <b>{cat_ref}</b>, Var: <b>{cat_var}</b>"
-                        return catalog_rule
-
-                    # Priority 2: Custom marker derivation from data
+                    auto_r, auto_v = 'A', 'G'
                     if detected_calls and len(detected_calls) > 0:
-                        auto_r, auto_v = extract_alleles_from_calls(detected_calls)
-                        def_p = ", ".join(detected_calls)
-                        return base_name, auto_r, auto_v, def_p, f"Observed: {def_p}", f"Custom Marker | Ref: <b>{auto_r}</b>, Var: <b>{auto_v}</b>"
+                        cand_r, cand_v = extract_alleles_from_calls(detected_calls)
+                        if cand_r:
+                            auto_r = cand_r
+                        if cand_v:
+                            auto_v = cand_v
 
-                    return base_name, 'A', 'G', 'AA, AG, GG', "Custom Target", f"Configurable mapping and rules for <b>{marker_label}</b>"
+                    badge_short = f"Column: {col_name}" if col_name else "Spreadsheet Mapping"
+                    if detected_calls:
+                        badge_detail = f"Observed calls in data: <b>{', '.join(detected_calls)}</b>"
+                    else:
+                        badge_detail = f"Configure permitted genotypes and alleles for <b>{base_name}</b>"
+
+                    # DO NOT pre-fill with hardcoded catalog strings - let the user enter or click chips!
+                    def_permitted = ""
+                    return base_name, auto_r, auto_v, def_permitted, badge_short, badge_detail
 
                 # Define callbacks to update widget session state safely before widgets instantiate
                 def cb_switch_target_gene(new_g, new_markers):
@@ -3189,15 +3132,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     if v_c:
                         st.session_state[v_k] = v_c
 
-                if detected_gene_matches:
-                    for sg in detected_gene_matches:
-                        sg_markers = catalog_df[catalog_df['Gene'] == sg]['Marker'].tolist() if not catalog_df.empty else []
-                        c_sg1, c_sg2 = st.columns([0.75, 0.25])
-                        with c_sg1:
-                            st.info(f"💡 **Smart Detection:** Your uploaded spreadsheet appears to contain columns for **{sg}**. Would you like to switch your active target gene to **{sg}**?")
-                        with c_sg2:
-                            st.markdown("<div style='margin-top: 8px;'></div>", unsafe_allow_html=True)
-                            st.button(f"👉 Switch to {sg}", key=f"btn_switch_to_{sg}", on_click=cb_switch_target_gene, args=(sg, sg_markers))
 
                 c_opt_filter, c_mode_sel = st.columns([0.45, 0.55])
                 with c_opt_filter:
@@ -3250,7 +3184,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         tot_samples_col = len(norm_calls)
 
                         # Determine defaults prioritizing detected calls in the data
-                        std_name, def_ref, def_var, def_permitted, badge_short, badge_detail = get_marker_defaults(marker_label, sel_map_gene, detected_calls_list)
+                        std_name, def_ref, def_var, def_permitted, badge_short, badge_detail = get_marker_defaults(marker_label, sel_map_gene, detected_calls_list, col_name=sel_col)
 
                         # Initialize session state for this card
                         if name_key not in st.session_state:
@@ -3263,14 +3197,15 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.session_state[perm_key] = def_permitted
 
                         cur_marker_name = st.session_state.get(name_key, std_name)
+                        obs_str = ', '.join([f"<b>{c}</b> ({cnt:,})" for c, cnt in observed_counts.items()]) if observed_counts else "<i>No calls detected in this column</i>"
                         st.markdown(f"""
-                        <div class="clean-card-box" style="margin-bottom: 8px; border-left: 4px solid #3B82F6;">
+                        <div class="clean-card-box" style="margin-bottom: 8px; border-left: 4px solid #3B82F6; padding: 12px 16px; background: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0;">
                             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                                <h5 style="margin:0; color:#0F172A; font-weight:700;">🧬 Marker #{idx+1}: {cur_marker_name}</h5>
-                                <span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #BFDBFE;">{badge_short}</span>
+                                <h5 style="margin:0; color:#0F172A; font-weight:700;">🧬 Biomarker #{idx+1}: {cur_marker_name}</h5>
+                                <span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #BFDBFE;">Column: <code>{sel_col}</code></span>
                             </div>
                             <div style="margin-top: 6px; font-size: 0.85rem; color: #475569;">
-                                {badge_detail}
+                                Observed Genotypes in column: {obs_str}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
@@ -3341,8 +3276,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             perm_val = st.text_input(
                                 "Permitted Genotypes (comma-separated):",
                                 value=st.session_state.get(perm_key, def_permitted),
+                                placeholder="e.g. CC, CT, TT or GA, GG, AA (or click chips below)",
                                 key=perm_key,
-                                help="Type any combinations e.g. CC, CT or GG, GA or AA or TT..."
+                                help="Type any combinations e.g. CC, CT or GG, GA or AA or TT, or click the observed genotype chips below"
                             )
                         with c_perm_info:
                             hom_ref_str = f"{ref_val}{ref_val}" if ref_val else "N/A"
@@ -3443,37 +3379,38 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             """, unsafe_allow_html=True)
 
                         # CHECK 2: Severe Allele Disconnect / Wrong Marker Column
-                        col_nucleotides = {ch for call in detected_calls_list for ch in str(call).upper() if ch in 'ACGT'}
-                        configured_alleles = {ch for ch in [ref_val, var_val] if ch in 'ACGT'}
-                        is_severe_disconnect = bool(col_nucleotides and configured_alleles and not col_nucleotides.intersection(configured_alleles))
-                        if is_severe_disconnect and not is_metadata_col:
-                            st.markdown(f"""
-                            <div style="background: #FFF7ED; border: 2px solid #F97316; border-radius: 8px; padding: 12px; margin-top: 10px; margin-bottom: 8px;">
-                                <div style="font-weight: 800; color: #9A3412; font-size: 14px;">🚨 SEVERE ALLELE MISMATCH: Possible Wrong Column Selected!</div>
-                                <div style="color: #7C2D12; font-size: 13px; margin-top: 4px;">
-                                    Observed calls in <code>{sel_col}</code> are <b>{detected_calls_list}</b> (nucleotides: <b>{sorted(col_nucleotides)}</b>).<br>
-                                    These have <b>ZERO overlap</b> with configured alleles for <b>{user_marker_name}</b> (Ref: <b>{ref_val}</b>, Var: <b>{var_val}</b>).<br>
-                                    Please verify if you selected the wrong column, or click below to align your alleles to this column if intended.
+                        if raw_perm_list:
+                            col_nucleotides = {ch for call in detected_calls_list for ch in str(call).upper() if ch in 'ACGT'}
+                            configured_alleles = {ch for ch in [ref_val, var_val] if ch in 'ACGT'}
+                            is_severe_disconnect = bool(col_nucleotides and configured_alleles and not col_nucleotides.intersection(configured_alleles))
+                            if is_severe_disconnect and not is_metadata_col:
+                                st.markdown(f"""
+                                <div style="background: #FFF7ED; border: 2px solid #F97316; border-radius: 8px; padding: 12px; margin-top: 10px; margin-bottom: 8px;">
+                                    <div style="font-weight: 800; color: #9A3412; font-size: 14px;">🚨 SEVERE ALLELE MISMATCH: Possible Wrong Column Selected!</div>
+                                    <div style="color: #7C2D12; font-size: 13px; margin-top: 4px;">
+                                        Observed calls in <code>{sel_col}</code> are <b>{detected_calls_list}</b> (nucleotides: <b>{sorted(col_nucleotides)}</b>).<br>
+                                        These have <b>ZERO overlap</b> with configured alleles for <b>{user_marker_name}</b> (Ref: <b>{ref_val}</b>, Var: <b>{var_val}</b>).<br>
+                                        Please verify if you selected the wrong column, or click below to align your alleles to this column if intended.
+                                    </div>
                                 </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            cand_col_r, cand_col_v = extract_alleles_from_calls(detected_calls_list)
-                            st.button(
-                                f"⚡ Align Alleles to this Column (Ref: {cand_col_r}, Var: {cand_col_v})",
-                                key=f"btn_align_severe_{idx}",
-                                on_click=cb_align_alleles,
-                                args=(ref_key, var_key, cand_col_r, cand_col_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
-                            )
+                                """, unsafe_allow_html=True)
+                                cand_col_r, cand_col_v = extract_alleles_from_calls(detected_calls_list)
+                                st.button(
+                                    f"⚡ Align Alleles to this Column (Ref: {cand_col_r}, Var: {cand_col_v})",
+                                    key=f"btn_align_severe_{idx}",
+                                    on_click=cb_align_alleles,
+                                    args=(ref_key, var_key, cand_col_r, cand_col_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                )
 
                         # CHECK 3: Extra / Unmapped Calls in Dataset
-                        unexpected_calls = [k for k in observed_counts.keys() if k not in expanded_set] if observed_counts else []
+                        unexpected_calls = [k for k in observed_counts.keys() if k not in expanded_set] if (observed_counts and raw_perm_list) else []
                         tot_unmapped_cnt = sum(observed_counts[u] for u in unexpected_calls) if unexpected_calls else 0
                         unmapped_pct = (tot_unmapped_cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
 
                         cand_r, cand_v = extract_alleles_from_calls(raw_perm_list)
                         perm_chars = {ch for g in raw_perm_list for ch in g if ch.isalpha()}
-                        ref_mismatch = bool(ref_val and ref_val not in perm_chars)
-                        var_mismatch = bool(var_val and var_val != 'None' and var_val not in perm_chars)
+                        ref_mismatch = bool(ref_val and ref_val not in perm_chars) if raw_perm_list else False
+                        var_mismatch = bool(var_val and var_val != 'None' and var_val not in perm_chars) if raw_perm_list else False
 
                         identical_alleles = bool(ref_val == var_val and ref_val != '' and var_val != 'None')
                         if identical_alleles:
@@ -3488,11 +3425,17 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 for call, cnt in sorted(observed_counts.items(), key=lambda x: x[1], reverse=True):
                                     pct = (cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
                                     is_covered = call in expanded_set
+                                    if is_covered:
+                                        status_str = "✅ Permitted"
+                                    elif not raw_perm_list:
+                                        status_str = "⚪ Pending User Entry"
+                                    else:
+                                        status_str = "🚨 Flagged: Unmapped (Extra)"
                                     check_rows.append({
                                         'Observed Genotype': call,
                                         'Sample Count': cnt,
                                         'Cohort %': f"{pct:.1f}%",
-                                        'Mapping Status': "✅ Permitted" if is_covered else "🚨 Flagged: Unmapped (Extra)"
+                                        'Mapping Status': status_str
                                     })
                                 st.dataframe(pd.DataFrame(check_rows), use_container_width=True, hide_index=True)
                             else:
@@ -3500,7 +3443,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                         with c_flg2:
                             if not raw_perm_list:
-                                st.error(f"⛔ **Rule Error:** Please enter or select at least one permitted genotype for **{user_marker_name}**.")
+                                st.info(f"ℹ️ **Action Needed:** Please enter permitted genotypes for **{user_marker_name}** above (type calls or click **[⚡ Allow All]** / chip buttons).")
                                 mapping_has_errors = True
                             elif unexpected_calls:
                                 st.markdown(f"""
@@ -3690,7 +3633,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             'col': col_options[0] if col_options else '',
                             'ref_allele': 'A',
                             'var_allele': 'G',
-                            'permitted': 'AA, AG, GG'
+                            'permitted': ''
                         })
                         st.session_state['extra_mapping_rows'] = extra_rows
                         st.rerun()
@@ -3725,7 +3668,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             'Spreadsheet Column': cur_c_ex if cur_c_ex in col_options else col_options[0],
                             'Reference Allele': row_item.get('ref_allele', 'A'),
                             'Variant Allele': row_item.get('var_allele', 'G'),
-                            'Permitted Genotypes': row_item.get('permitted', 'AA, AG, GG')
+                            'Permitted Genotypes': row_item.get('permitted', '')
                         })
 
                     init_table_df = pd.DataFrame(editor_data)
