@@ -81,3 +81,38 @@ def test_auto_heal_gene_from_markers():
     inferred_gene = m_genes[0]
     assert inferred_gene == 'CYP2C9'
     assert target_gene != inferred_gene
+
+def test_find_best_column_match_exact_and_rsid():
+    from core.gene_utils import find_best_column_match
+    cols = ['Sample ID', 'Gender', 'State', 'CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
+
+    # Exact match with marker label
+    assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', cols) == 'CYP2C9*2 (rs1799853)'
+    assert find_best_column_match('CYP2C9*3 (rs1057910)', 'CYP2C9*3', 'CYP2C9', cols) == 'CYP2C9*3 (rs1057910)'
+
+    # rsID match
+    rs_cols = ['Sample ID', 'rs1799853', 'rs1057910']
+    assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', rs_cols) == 'rs1799853'
+    assert find_best_column_match('CYP2C9*3 (rs1057910)', 'CYP2C9*3', 'CYP2C9', rs_cols) == 'rs1057910'
+
+def test_find_best_column_match_star_alleles():
+    from core.gene_utils import find_best_column_match
+    star_cols = ['Sample ID', 'CYP2C9*2', 'CYP2C9*3']
+    assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', star_cols) == 'CYP2C9*2'
+
+    short_star_cols = ['Sample ID', '*2', '*3']
+    assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', short_star_cols) == '*2'
+
+def test_find_best_column_match_no_false_fallback():
+    from core.gene_utils import find_best_column_match
+    cols_19 = ['Sample ID', 'Gender', 'CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
+
+    # When active gene is CYP2C9, matching CYP2C9*2 against CYP2C19 dataset must return empty string
+    assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', cols_19) == ""
+    assert find_best_column_match('CYP2C9*3 (rs1057910)', 'CYP2C9*3', 'CYP2C9', cols_19) == ""
+
+def test_find_best_column_match_ignores_select_column():
+    from core.gene_utils import find_best_column_match
+    cols_with_select = ['(Select Column)', 'Sample ID', 'CYP2C9*2']
+    assert find_best_column_match('CYP2C9*2 (rs1799853)', 'CYP2C9*2', 'CYP2C9', cols_with_select) == 'CYP2C9*2'
+    assert find_best_column_match('CYP2C19*2 (rs4244285)', 'CYP2C19*2', 'CYP2C19', cols_with_select) == ""

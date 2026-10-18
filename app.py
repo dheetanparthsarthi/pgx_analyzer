@@ -352,10 +352,10 @@ if 'datasets_dict' not in st.session_state:
     st.session_state['datasets_dict'] = {}
 
 if 'selected_gene' not in st.session_state:
-    st.session_state['selected_gene'] = 'CYP2C19'
+    st.session_state['selected_gene'] = None
 
 if 'selected_markers' not in st.session_state:
-    st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+    st.session_state['selected_markers'] = []
 
 if 'workflow_step' not in st.session_state:
     st.session_state['workflow_step'] = '1 · Select Target'
@@ -378,22 +378,18 @@ if 'custom_snp_rules' not in st.session_state:
 if 'mapped_marker_details' not in st.session_state:
     st.session_state['mapped_marker_details'] = {}
 
-EMPTY_COLS = [
-    'sample ID', 'Gender', 'Date of Birth', 'Native place ', 'State',
-    'Test requested', 'Is their family lived at Native place for past 3 generations?',
-    'CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 ( rs12248560)'
-]
+EMPTY_COLS = []
 
 # Auto-restore active dataset from disk cache if session state was cleared by a page reload/refresh
-if not st.session_state.get('is_deleted', False) and (st.session_state['uploaded_df'] is None or len(st.session_state['uploaded_df']) == 0):
+if not st.session_state.get('is_deleted', False) and (st.session_state.get('uploaded_df') is None or len(st.session_state['uploaded_df']) == 0):
     persisted_df = load_persisted_dataset()
     if persisted_df is not None and len(persisted_df) > 0:
         st.session_state['uploaded_df'] = persisted_df
         if 'workflow_step' not in st.session_state:
             st.session_state['workflow_step'] = '1 · Select Target'
 
-if st.session_state['uploaded_df'] is None:
-    st.session_state['uploaded_df'] = pd.DataFrame(columns=EMPTY_COLS)
+if st.session_state.get('uploaded_df') is None:
+    st.session_state['uploaded_df'] = pd.DataFrame()
 
 db_manager = DatabaseManager()
 
@@ -561,13 +557,13 @@ def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
             return c
     return None
 
-from core.gene_utils import KNOWN_PGX_GENES, get_column_gene, detect_genes_in_columns, get_default_markers_for_gene
+from core.gene_utils import KNOWN_PGX_GENES, get_column_gene, detect_genes_in_columns, get_default_markers_for_gene, find_best_column_match
 
 def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: pd.DataFrame = None):
     """Sets active target gene and its markers across session state and synchronizes all widget keys."""
-    gene_u = str(gene_symbol).strip().upper()
+    gene_u = str(gene_symbol).strip().upper() if gene_symbol else None
     if markers is None:
-        markers = get_default_markers_for_gene(gene_u, catalog_df)
+        markers = get_default_markers_for_gene(gene_u, catalog_df) if gene_u else []
     st.session_state['selected_gene'] = gene_u
     st.session_state['selected_markers'] = list(markers)
     # Clear stale widget keys so dropdowns cleanly re-initialize to the new target
@@ -627,7 +623,9 @@ def clear_deletion_flag():
 def reset_all_data():
     """Clears session dataset, resets custom column mappings, creates permanent deletion marker, and purges database & cache."""
     st.session_state['is_deleted'] = True
-    st.session_state['uploaded_df'] = pd.DataFrame(columns=EMPTY_COLS)
+    st.session_state['uploaded_df'] = pd.DataFrame()
+    st.session_state['selected_gene'] = None
+    st.session_state['selected_markers'] = []
     st.session_state['mapped_cols'] = {}
     st.session_state['demographic_mapping'] = {}
     st.session_state['datasets_dict'] = {}
@@ -638,6 +636,9 @@ def reset_all_data():
     st.session_state['merge_alignment_log'] = None
     st.session_state['show_delete_confirm'] = False
     st.session_state['workflow_step'] = '1 · Select Target'
+    for k in list(st.session_state.keys()):
+        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_', 'step1_sel_', 'map_step_')):
+            del st.session_state[k]
     
     clear_active_dataset_cache()
 
@@ -2253,46 +2254,67 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
             custom_genes = st.session_state.get('custom_genes', [])
             gene_list = sorted(list(set(catalog_genes + custom_genes)))
-            curr_gene = st.session_state.get('selected_gene', 'CYP2C19')
-            if curr_gene not in gene_list:
-                curr_gene = 'CYP2C19' if 'CYP2C19' in gene_list else gene_list[0]
-            g_idx = gene_list.index(curr_gene)
+            gene_options = ["(Select Target Gene)"] + gene_list
+            curr_gene = st.session_state.get('selected_gene')
+            g_idx = gene_options.index(curr_gene) if (curr_gene and curr_gene in gene_options) else 0
 
-            if 'step1_sel_gene' in st.session_state and st.session_state['step1_sel_gene'] != curr_gene:
-                del st.session_state['step1_sel_gene']
+            if 'step1_sel_gene' in st.session_state:
+                if st.session_state['step1_sel_gene'] not in gene_options or (curr_gene and st.session_state['step1_sel_gene'] != curr_gene):
+                    del st.session_state['step1_sel_gene']
 
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:
-                sel_gene = st.selectbox("1️⃣ Select Target Gene:", gene_list, index=g_idx, key="step1_sel_gene")
-                if sel_gene != st.session_state.get('selected_gene'):
-                    set_active_target_gene(sel_gene, catalog_df=catalog_df)
-                    st.rerun()
+                sel_gene_choice = st.selectbox("1️⃣ Select Target Gene:", gene_options, index=g_idx, key="step1_sel_gene")
+                if sel_gene_choice != "(Select Target Gene)":
+                    if sel_gene_choice != st.session_state.get('selected_gene'):
+                        set_active_target_gene(sel_gene_choice, markers=[], catalog_df=catalog_df)
+                        st.rerun()
+                else:
+                    if st.session_state.get('selected_gene') is not None:
+                        set_active_target_gene(None, markers=[], catalog_df=catalog_df)
+                        st.rerun()
 
             with c_g2:
-                base_markers = get_default_markers_for_gene(sel_gene, catalog_df)
-                custom_m_for_gene = st.session_state.get('custom_markers', {}).get(sel_gene, [])
-                available_markers = []
-                for m in base_markers + custom_m_for_gene:
-                    if m not in available_markers:
-                        available_markers.append(m)
+                sel_gene = st.session_state.get('selected_gene')
+                if sel_gene:
+                    base_markers = get_default_markers_for_gene(sel_gene, catalog_df)
+                    custom_m_for_gene = st.session_state.get('custom_markers', {}).get(sel_gene, [])
+                    available_markers = []
+                    for m in base_markers + custom_m_for_gene:
+                        if m not in available_markers:
+                            available_markers.append(m)
 
-                curr_selected = st.session_state.get('selected_markers')
-                if curr_selected:
+                    curr_selected = st.session_state.get('selected_markers', [])
                     valid_defaults = [m for m in curr_selected if m in available_markers]
+
+                    c_btn_m1, c_btn_m2, _ = st.columns([0.3, 0.3, 0.4])
+                    with c_btn_m1:
+                        if st.button("⚡ Select All", key="btn_sel_all_markers_step1", help="Select all available biomarkers"):
+                            st.session_state['selected_markers'] = list(available_markers)
+                            if 'step1_sel_markers' in st.session_state:
+                                del st.session_state['step1_sel_markers']
+                            st.rerun()
+                    with c_btn_m2:
+                        if st.button("🧹 Clear All", key="btn_desel_all_markers_step1", help="Deselect all biomarkers"):
+                            st.session_state['selected_markers'] = []
+                            if 'step1_sel_markers' in st.session_state:
+                                del st.session_state['step1_sel_markers']
+                            st.rerun()
+
+                    if 'step1_sel_markers' in st.session_state:
+                        if any(m not in available_markers for m in st.session_state['step1_sel_markers']):
+                            del st.session_state['step1_sel_markers']
+
+                    sel_markers = st.multiselect(
+                        f"2️⃣ Select Biomarker(s) for {sel_gene}:",
+                        available_markers,
+                        default=valid_defaults,
+                        key="step1_sel_markers",
+                        placeholder="Choose biomarkers to analyze or click 'Select All'"
+                    )
+                    st.session_state['selected_markers'] = sel_markers
                 else:
-                    valid_defaults = available_markers
-
-                if 'step1_sel_markers' in st.session_state:
-                    if any(m not in available_markers for m in st.session_state['step1_sel_markers']):
-                        del st.session_state['step1_sel_markers']
-
-                sel_markers = st.multiselect(
-                    f"2️⃣ Select Biomarker(s) for {sel_gene}:",
-                    available_markers,
-                    default=valid_defaults,
-                    key="step1_sel_markers"
-                )
-                st.session_state['selected_markers'] = sel_markers
+                    st.info("👆 Please select a target gene to configure biomarkers, or proceed to **2 · Upload** to upload your dataset and auto-detect your target gene.")
 
             # Expandable Section: Add Custom Gene / Biomarker Manually
             with st.expander("➕ Can't find your Gene or Biomarker? Add Custom Targets Manually", expanded=False):
@@ -2348,12 +2370,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if st.button("🗑️ Clear Custom Targets", key="btn_clear_custom_targets_step1"):
                             st.session_state['custom_genes'] = []
                             st.session_state['custom_markers'] = {}
-                            set_active_target_gene('CYP2C19', catalog_df=catalog_df)
+                            set_active_target_gene(None, catalog_df=catalog_df)
                             st.rerun()
 
             # Active Target Summary Card
             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-            active_gene = st.session_state.get('selected_gene', 'CYP2C19')
+            active_gene = st.session_state.get('selected_gene') or 'None Selected'
             active_markers = st.session_state.get('selected_markers', [])
             num_m = len(active_markers)
 
@@ -2471,6 +2493,16 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
                                 st.session_state['mapped_cols'] = {}
                                 save_active_dataset(df_load)
+
+                                # Auto-detect target gene and present markers directly from uploaded file columns
+                                detected_file_genes = detect_genes_in_columns(df_load.columns)
+                                if detected_file_genes:
+                                    primary_g = detected_file_genes[0]
+                                    all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
+                                    matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(df_load.columns))]
+                                    chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
+                                    set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
+
                                 st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns).")
                                 st.rerun()
                     except Exception as e:
@@ -2495,6 +2527,13 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             'Gender': chk_res['gender_col'],
                             'State': chk_res['state_col']
                         }
+                        detected_file_genes = detect_genes_in_columns(new_df.columns)
+                        if detected_file_genes:
+                            primary_g = detected_file_genes[0]
+                            all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
+                            matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(new_df.columns))]
+                            chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
+                            set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
                         save_active_dataset(new_df)
                         st.rerun()
 
@@ -2568,7 +2607,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             # TARGET BIOMARKER & COLUMN HEADER AUDIT (STEP 1 TARGET VS UPLOADED HEADERS)
             # -------------------------------------------------------------------------
             if raw_cols:
-                target_gene_active = st.session_state.get('selected_gene', 'CYP2C19')
+                detected_file_genes = detect_genes_in_columns(raw_cols)
+                target_gene_active = st.session_state.get('selected_gene')
+                if not target_gene_active and detected_file_genes:
+                    target_gene_active = detected_file_genes[0]
+                    st.session_state['selected_gene'] = target_gene_active
+
                 target_markers_active = st.session_state.get('selected_markers', [])
 
                 # Auto-heal target gene if selected markers belong to a different gene
@@ -2580,20 +2624,24 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             m_genes.extend(dg)
                     if m_genes and all(g.upper() == m_genes[0].upper() for g in m_genes):
                         inferred_gene = m_genes[0]
-                        if target_gene_active.upper() != inferred_gene.upper():
+                        if not target_gene_active or target_gene_active.upper() != inferred_gene.upper():
                             set_active_target_gene(inferred_gene, markers=target_markers_active, catalog_df=catalog_df)
                             target_gene_active = inferred_gene
 
-                if not target_markers_active:
-                    target_markers_active = get_default_markers_for_gene(target_gene_active, catalog_df)
+                if target_gene_active and not target_markers_active:
+                    all_g_markers = get_default_markers_for_gene(target_gene_active, catalog_df)
+                    matched_f = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], target_gene_active, raw_cols)]
+                    target_markers_active = matched_f if matched_f else all_g_markers
                     st.session_state['selected_markers'] = target_markers_active
 
                 st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
                 st.markdown("#### 🎯 Target Biomarker & Header Audit")
-                st.caption(f"Verifying uploaded column headers against your Step 1 selection: Target Gene **{target_gene_active}** ({len(target_markers_active)} biomarker(s)).")
+                if target_gene_active:
+                    st.caption(f"Verifying uploaded column headers against your selection: Target Gene **{target_gene_active}** ({len(target_markers_active)} biomarker(s)).")
+                else:
+                    st.caption("Verifying uploaded column headers against pharmacogenetic targets.")
 
-                detected_file_genes = detect_genes_in_columns(raw_cols)
-                gene_mismatch = bool(detected_file_genes and target_gene_active.upper() not in [g.upper() for g in detected_file_genes])
+                gene_mismatch = bool(detected_file_genes and target_gene_active and target_gene_active.upper() not in [g.upper() for g in detected_file_genes])
 
                 if gene_mismatch:
                     found_genes_str = ", ".join(detected_file_genes)
@@ -2622,26 +2670,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 audit_cols_display = []
                 for m in target_markers_active:
                     m_base = m.split(' ')[0] if ' ' in m else m
-                    m_star = re.search(r'\*\d+[a-zA-Z]?', m)
-                    star_val = m_star.group(0).lower() if m_star else ""
-                    rs_m = re.search(r'rs\d+', m.lower())
-                    rs_val = rs_m.group(0) if rs_m else ""
-
-                    matched_col = None
-                    for c in raw_cols:
-                        c_l = str(c).lower()
-                        if target_gene_active.lower() in c_l and star_val and star_val in c_l:
-                            matched_col = c
-                            break
-                        if rs_val and rs_val in c_l:
-                            matched_col = c
-                            break
-                        if m_base.lower() in c_l:
-                            matched_col = c
-                            break
+                    matched_col = find_best_column_match(m, m_base, target_gene_active or '', raw_cols)
 
                     audit_cols_display.append({
-                        'Biomarker (Step 1)': m,
+                        'Biomarker (Target)': m,
                         'Header in File': matched_col if matched_col else "❌ Not found in file",
                         'Match Status': "✅ Header Match" if matched_col else "⚠️ Different / Missing Header"
                     })
@@ -2842,49 +2874,69 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
             custom_genes = st.session_state.get('custom_genes', [])
             all_catalog_genes = sorted(list(set(catalog_genes + custom_genes)))
+            gene_options = ["(Select Target Gene)"] + all_catalog_genes
 
-            curr_gene = st.session_state.get('selected_gene', 'CYP2C19')
-            if curr_gene not in all_catalog_genes:
-                curr_gene = 'CYP2C19' if 'CYP2C19' in all_catalog_genes else all_catalog_genes[0]
-            g_idx = all_catalog_genes.index(curr_gene)
+            curr_gene = st.session_state.get('selected_gene')
+            g_idx = gene_options.index(curr_gene) if (curr_gene and curr_gene in gene_options) else 0
 
-            if 'map_step_gene_sel' in st.session_state and st.session_state['map_step_gene_sel'] != curr_gene:
-                del st.session_state['map_step_gene_sel']
+            if 'map_step_gene_sel' in st.session_state:
+                if st.session_state['map_step_gene_sel'] not in gene_options or (curr_gene and st.session_state['map_step_gene_sel'] != curr_gene):
+                    del st.session_state['map_step_gene_sel']
 
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:
-                sel_map_gene = st.selectbox("1️⃣ Select Target Gene:", all_catalog_genes, index=g_idx, key="map_step_gene_sel")
-                if sel_map_gene != st.session_state.get('selected_gene'):
-                    set_active_target_gene(sel_map_gene, catalog_df=catalog_df)
-                    st.rerun()
+                sel_map_gene_choice = st.selectbox("1️⃣ Select Target Gene:", gene_options, index=g_idx, key="map_step_gene_sel")
+                if sel_map_gene_choice != "(Select Target Gene)":
+                    if sel_map_gene_choice != st.session_state.get('selected_gene'):
+                        set_active_target_gene(sel_map_gene_choice, markers=[], catalog_df=catalog_df)
+                        st.rerun()
+                else:
+                    if st.session_state.get('selected_gene') is not None:
+                        set_active_target_gene(None, markers=[], catalog_df=catalog_df)
+                        st.rerun()
 
             with c_g2:
-                # Dynamic list of markers for the chosen gene
-                base_markers = get_default_markers_for_gene(sel_map_gene, catalog_df)
-                custom_m_for_gene = st.session_state.get('custom_markers', {}).get(sel_map_gene, [])
-                available_markers = []
-                for m in base_markers + custom_m_for_gene:
-                    if m not in available_markers:
-                        available_markers.append(m)
+                sel_map_gene = st.session_state.get('selected_gene')
+                if sel_map_gene:
+                    base_markers = get_default_markers_for_gene(sel_map_gene, catalog_df)
+                    custom_m_for_gene = st.session_state.get('custom_markers', {}).get(sel_map_gene, [])
+                    available_markers = []
+                    for m in base_markers + custom_m_for_gene:
+                        if m not in available_markers:
+                            available_markers.append(m)
 
-                # Ensure default selections
-                curr_selected = st.session_state.get('selected_markers')
-                if curr_selected:
+                    curr_selected = st.session_state.get('selected_markers', [])
                     valid_defaults = [m for m in curr_selected if m in available_markers]
+
+                    c_btn_m1, c_btn_m2, _ = st.columns([0.3, 0.3, 0.4])
+                    with c_btn_m1:
+                        if st.button("⚡ Select All", key="btn_sel_all_markers_step3", help="Select all available biomarkers"):
+                            st.session_state['selected_markers'] = list(available_markers)
+                            if 'map_step_marker_sel' in st.session_state:
+                                del st.session_state['map_step_marker_sel']
+                            st.rerun()
+                    with c_btn_m2:
+                        if st.button("🧹 Clear All", key="btn_desel_all_markers_step3", help="Deselect all biomarkers"):
+                            st.session_state['selected_markers'] = []
+                            if 'map_step_marker_sel' in st.session_state:
+                                del st.session_state['map_step_marker_sel']
+                            st.rerun()
+
+                    if 'map_step_marker_sel' in st.session_state:
+                        if any(m not in available_markers for m in st.session_state['map_step_marker_sel']):
+                            del st.session_state['map_step_marker_sel']
+
+                    sel_map_markers = st.multiselect(
+                        f"2️⃣ Select Biomarker(s) for {sel_map_gene}:",
+                        available_markers,
+                        default=valid_defaults,
+                        key="map_step_marker_sel",
+                        placeholder="Choose biomarkers to analyze or click 'Select All'"
+                    )
+                    st.session_state['selected_markers'] = sel_map_markers
                 else:
-                    valid_defaults = available_markers
-
-                if 'map_step_marker_sel' in st.session_state:
-                    if any(m not in available_markers for m in st.session_state['map_step_marker_sel']):
-                        del st.session_state['map_step_marker_sel']
-
-                sel_map_markers = st.multiselect(
-                    f"2️⃣ Select Biomarker(s) for {sel_map_gene}:",
-                    available_markers,
-                    default=valid_defaults,
-                    key="map_step_marker_sel"
-                )
-                st.session_state['selected_markers'] = sel_map_markers
+                    sel_map_markers = []
+                    st.info("👆 Please select a target gene to configure biomarkers.")
 
             # Expandable Section: Add Custom Gene / Biomarker Manually directly in Step 3
             with st.expander("➕ Can't find your Gene or Biomarker? Add Custom Targets Manually", expanded=False):
@@ -2940,7 +2992,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if st.button("🗑️ Clear Custom Targets", key="btn_clear_custom_targets_step3"):
                             st.session_state['custom_genes'] = []
                             st.session_state['custom_markers'] = {}
-                            set_active_target_gene('CYP2C19', catalog_df=catalog_df)
+                            set_active_target_gene(None, catalog_df=catalog_df)
                             st.rerun()
 
             if not sel_map_markers:
@@ -3004,63 +3056,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     v = most[1] if len(most) > 1 else 'None'
                     return r, v
 
-                def find_default(patterns, cols):
-                    for pattern in patterns:
-                        for c in cols:
-                            if str(pattern).strip().lower() == str(c).strip().lower():
-                                return c
-                    for pattern in patterns:
-                        p_norm = str(pattern).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
-                        if not p_norm: continue
-                        for c in cols:
-                            c_norm = str(c).lower().replace(" ", "").replace("*", "").replace("(", "").replace(")", "").replace("-", "")
-                            if p_norm == c_norm or p_norm in c_norm or c_norm in p_norm:
-                                return c
-                    for pattern in patterns:
-                        for c in cols:
-                            if str(pattern).lower() in str(c).lower():
-                                return c
-                    return cols[0] if cols else ""
-
-                def find_best_column_match(marker_label: str, std_name: str, sel_gene: str, cols: list) -> str:
-                    if not cols:
-                        return ""
-                    # 1. Exact match with label, name, or gene_marker
-                    for target in [marker_label, std_name, f"{sel_gene}_{std_name}", f"{sel_gene} {std_name}", f"{sel_gene}_{marker_label}"]:
-                        for c in cols:
-                            if str(target).strip().lower() == str(c).strip().lower():
-                                return c
-
-                    # 2. Extract rsID if present in marker_label or std_name
-                    import re
-                    rs_match = re.search(r'rs\d+', f"{marker_label} {std_name}".lower())
-                    if rs_match:
-                        rs_id = rs_match.group(0)
-                        for c in cols:
-                            if rs_id in str(c).lower():
-                                return c
-
-                    # 3. Check for gene + star allele e.g. CYP2C9 and *2
-                    star_match = re.search(r'\*\d+[a-zA-Z]?', f"{marker_label} {std_name}")
-                    if star_match:
-                        star_str = star_match.group(0).lower()
-                        for c in cols:
-                            c_low = str(c).lower()
-                            if sel_gene.lower() in c_low and star_str in c_low:
-                                return c
-                        # Only fallback to star_str if column header does NOT belong to another gene
-                        for c in cols:
-                            cg = get_column_gene(c)
-                            if star_str in str(c).lower() and (not cg or cg.upper() == sel_gene.upper()):
-                                return c
-
-                    # 4. Fallback: column containing sel_gene
-                    for c in cols:
-                        if sel_gene.lower() in str(c).lower():
-                            return c
-
-                    # 5. Fallback to find_default
-                    return find_default([marker_label, std_name], cols)
 
                 def get_marker_defaults(marker_label: str, sel_gene: str, detected_calls: list = None, col_name: str = ""):
                     """
@@ -3246,7 +3241,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 c_opt_filter, c_mode_sel = st.columns([0.45, 0.55])
                 with c_opt_filter:
                     show_all_cols = st.checkbox("Show all spreadsheet columns in options", value=False, key="cb_show_all_cols_step3", help="Enable if your genotype column was auto-classified as metadata")
-                col_options = all_cols if show_all_cols else genotype_cols
+                candidate_cols = [c for c in (all_cols if show_all_cols else genotype_cols) if c not in confirmed_demo_cols and not str(c).startswith('Unnamed:')]
+                if not candidate_cols and all_cols:
+                    candidate_cols = [c for c in all_cols if not str(c).startswith('Unnamed:')]
+                col_options = ["(Select Column)"] + candidate_cols
 
                 with c_mode_sel:
                     mapping_view_mode = st.radio(
@@ -3299,7 +3297,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         # Determine best matching column
                         best_match = find_best_column_match(marker_label, marker_label.split(' ')[0], sel_map_gene, col_options)
                         if col_key not in st.session_state or st.session_state[col_key] not in col_options:
-                            st.session_state[col_key] = best_match if (best_match and best_match in col_options) else col_options[0]
+                            st.session_state[col_key] = best_match if (best_match and best_match in col_options) else "(Select Column)"
 
                         sel_col = st.session_state[col_key]
 
@@ -3307,7 +3305,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         observed_counts = {}
                         detected_calls_list = []
                         norm_calls = pd.Series(dtype=str)
-                        if sel_col in df_raw.columns:
+                        if sel_col != "(Select Column)" and sel_col in df_raw.columns:
                             raw_s = df_raw[sel_col].dropna().astype(str).str.strip().str.upper()
                             valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
                             norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
@@ -3316,7 +3314,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         tot_samples_col = len(norm_calls)
 
                         # Determine defaults prioritizing detected calls in the data
-                        std_name, def_ref, def_var, def_permitted, badge_short, badge_detail = get_marker_defaults(marker_label, sel_map_gene, detected_calls_list, col_name=sel_col)
+                        std_name, def_ref, def_var, def_permitted, badge_short, badge_detail = get_marker_defaults(marker_label, sel_map_gene, detected_calls_list, col_name=(sel_col if sel_col != "(Select Column)" else ""))
 
                         # Initialize session state for this card
                         if name_key not in st.session_state:
@@ -3329,12 +3327,21 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.session_state[perm_key] = def_permitted
 
                         cur_marker_name = st.session_state.get(name_key, std_name)
-                        obs_str = ', '.join([f"<b>{c}</b> ({cnt:,})" for c, cnt in observed_counts.items()]) if observed_counts else "<i>No calls detected in this column</i>"
+                        if sel_col == "(Select Column)":
+                            mapping_has_errors = True
+                            col_badge_html = '<span style="background-color: #FEF3C7; color: #92400E; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #FDE68A;">Column: <i>Not Selected</i></span>'
+                            obs_str = '<span style="color: #92400E; font-style: italic;">Select spreadsheet column below to inspect observed genotypes</span>'
+                            card_border = "#F59E0B"
+                        else:
+                            col_badge_html = f'<span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #BFDBFE;">Column: <code>{sel_col}</code></span>'
+                            obs_str = ', '.join([f"<b>{c}</b> ({cnt:,})" for c, cnt in observed_counts.items()]) if observed_counts else "<i>No calls detected in this column</i>"
+                            card_border = "#3B82F6"
+
                         st.markdown(f"""
-                        <div class="clean-card-box" style="margin-bottom: 8px; border-left: 4px solid #3B82F6; padding: 12px 16px; background: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0;">
+                        <div class="clean-card-box" style="margin-bottom: 8px; border-left: 4px solid {card_border}; padding: 12px 16px; background: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0;">
                             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
                                 <h5 style="margin:0; color:#0F172A; font-weight:700;">🧬 Biomarker #{idx+1}: {cur_marker_name}</h5>
-                                <span style="background-color: #EFF6FF; color: #1D4ED8; font-size: 0.8rem; font-weight: 600; padding: 3px 10px; border-radius: 9999px; border: 1px solid #BFDBFE;">Column: <code>{sel_col}</code></span>
+                                {col_badge_html}
                             </div>
                             <div style="margin-top: 6px; font-size: 0.85rem; color: #475569;">
                                 Observed Genotypes in column: {obs_str}
@@ -3342,46 +3349,47 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         </div>
                         """, unsafe_allow_html=True)
 
-                        # Check for header discrepancies (different gene, star allele, or rsID)
-                        col_gene = get_column_gene(sel_col)
-                        is_diff_gene = bool(col_gene and col_gene.upper() != sel_map_gene.upper())
+                        if sel_col != "(Select Column)":
+                            # Check for header discrepancies (different gene, star allele, or rsID)
+                            col_gene = get_column_gene(sel_col)
+                            is_diff_gene = bool(col_gene and sel_map_gene and col_gene.upper() != sel_map_gene.upper())
 
-                        m_star = re.search(r'\*\d+[a-zA-Z]?', cur_marker_name)
-                        c_star = re.search(r'\*\d+[a-zA-Z]?', str(sel_col))
-                        is_diff_star = bool(m_star and c_star and m_star.group(0).lower() != c_star.group(0).lower())
+                            m_star = re.search(r'\*\d+[a-zA-Z]?', cur_marker_name)
+                            c_star = re.search(r'\*\d+[a-zA-Z]?', str(sel_col))
+                            is_diff_star = bool(m_star and c_star and m_star.group(0).lower() != c_star.group(0).lower())
 
-                        m_rs = re.search(r'rs\d+', cur_marker_name.lower())
-                        c_rs = re.search(r'rs\d+', str(sel_col).lower())
-                        is_diff_rs = bool(m_rs and c_rs and m_rs.group(0) != c_rs.group(0))
+                            m_rs = re.search(r'rs\d+', cur_marker_name.lower())
+                            c_rs = re.search(r'rs\d+', str(sel_col).lower())
+                            is_diff_rs = bool(m_rs and c_rs and m_rs.group(0) != c_rs.group(0))
 
-                        if is_diff_gene:
-                            st.markdown(f"""
-                            <div style="background: #FEF2F2; border: 2px solid #EF4444; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
-                                <div style="font-weight: 800; color: #991B1B; font-size: 13px;">🚨 GENE HEADER MISMATCH: Column <code>{sel_col}</code> belongs to {col_gene}, but active gene is {sel_map_gene}!</div>
-                                <div style="color: #7F1D1D; font-size: 12px; margin-top: 3px;">
-                                    Target marker is <b>{cur_marker_name}</b> ({sel_map_gene}), but selected column <code>{sel_col}</code> represents gene <b>{col_gene}</b>.<br>
-                                    Please verify if you selected the wrong column from the dropdown above.
+                            if is_diff_gene:
+                                st.markdown(f"""
+                                <div style="background: #FEF2F2; border: 2px solid #EF4444; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
+                                    <div style="font-weight: 800; color: #991B1B; font-size: 13px;">🚨 GENE HEADER MISMATCH: Column <code>{sel_col}</code> belongs to {col_gene}, but active gene is {sel_map_gene}!</div>
+                                    <div style="color: #7F1D1D; font-size: 12px; margin-top: 3px;">
+                                        Target marker is <b>{cur_marker_name}</b> ({sel_map_gene}), but selected column <code>{sel_col}</code> represents gene <b>{col_gene}</b>.<br>
+                                        Please verify if you selected the wrong column from the dropdown below.
+                                    </div>
                                 </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        elif is_diff_star:
-                            st.markdown(f"""
-                            <div style="background: #FFFBEB; border: 2px solid #F59E0B; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
-                                <div style="font-weight: 800; color: #B45309; font-size: 13px;">⚠️ STAR ALLELE MISMATCH: Target is {m_star.group(0)}, but column header is {c_star.group(0)}!</div>
-                                <div style="color: #92400E; font-size: 12px; margin-top: 3px;">
-                                    Target marker <b>{cur_marker_name}</b> is for <b>{m_star.group(0)}</b>, but column header <code>{sel_col}</code> indicates <b>{c_star.group(0)}</b>.
+                                """, unsafe_allow_html=True)
+                            elif is_diff_star:
+                                st.markdown(f"""
+                                <div style="background: #FFFBEB; border: 2px solid #F59E0B; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
+                                    <div style="font-weight: 800; color: #B45309; font-size: 13px;">⚠️ STAR ALLELE MISMATCH: Target is {m_star.group(0)}, but column header is {c_star.group(0)}!</div>
+                                    <div style="color: #92400E; font-size: 12px; margin-top: 3px;">
+                                        Target marker <b>{cur_marker_name}</b> is for <b>{m_star.group(0)}</b>, but column header <code>{sel_col}</code> indicates <b>{c_star.group(0)}</b>.
+                                    </div>
                                 </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        elif is_diff_rs:
-                            st.markdown(f"""
-                            <div style="background: #FFFBEB; border: 2px solid #F59E0B; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
-                                <div style="font-weight: 800; color: #B45309; font-size: 13px;">⚠️ RSID MISMATCH: Target is {m_rs.group(0)}, but column header has {c_rs.group(0)}!</div>
-                                <div style="color: #92400E; font-size: 12px; margin-top: 3px;">
-                                    Please verify if column <code>{sel_col}</code> corresponds to marker <b>{cur_marker_name}</b>.
+                                """, unsafe_allow_html=True)
+                            elif is_diff_rs:
+                                st.markdown(f"""
+                                <div style="background: #FFFBEB; border: 2px solid #F59E0B; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
+                                    <div style="font-weight: 800; color: #B45309; font-size: 13px;">⚠️ RSID MISMATCH: Target is {m_rs.group(0)}, but column header has {c_rs.group(0)}!</div>
+                                    <div style="color: #92400E; font-size: 12px; margin-top: 3px;">
+                                        Please verify if column <code>{sel_col}</code> corresponds to marker <b>{cur_marker_name}</b>.
+                                    </div>
                                 </div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
 
                         c_top1, c_top2, c_top3 = st.columns([1.1, 1.5, 0.4])
                         with c_top1:
@@ -3404,13 +3412,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             )
                             if new_sel_col != sel_col:
                                 sel_col = new_sel_col
-                                if sel_col in df_raw.columns:
-                                    raw_s = df_raw[sel_col].dropna().astype(str).str.strip().str.upper()
-                                    valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
-                                    norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
-                                    observed_counts = dict(norm_calls.value_counts())
-                                    detected_calls_list = list(observed_counts.keys())
-                                    tot_samples_col = len(norm_calls)
+                                st.session_state[col_key] = new_sel_col
+                                st.rerun()
                         with c_top3:
                             st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                             st.button("🗑️ Remove", key=f"btn_remove_marker_{idx}", on_click=cb_remove_marker_card, args=(idx,), help=f"Remove marker from mapping")
@@ -3591,90 +3594,99 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                         c_flg1, c_flg2 = st.columns([1.5, 1.5])
-                        with c_flg1:
-                            st.markdown(f"**Data Audit for `{sel_col}` ({tot_samples_col:,} valid samples):**")
-                            if observed_counts:
-                                check_rows = []
-                                for call, cnt in sorted(observed_counts.items(), key=lambda x: x[1], reverse=True):
-                                    pct = (cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
-                                    is_covered = call in expanded_set
-                                    if is_covered:
-                                        status_str = "✅ Permitted"
-                                    elif not raw_perm_list:
-                                        status_str = "⚪ Pending User Entry"
-                                    else:
-                                        status_str = "🚨 Flagged: Unmapped (Extra)"
-                                    check_rows.append({
-                                        'Observed Genotype': call,
-                                        'Sample Count': cnt,
-                                        'Cohort %': f"{pct:.1f}%",
-                                        'Mapping Status': status_str
-                                    })
-                                st.dataframe(pd.DataFrame(check_rows), use_container_width=True, hide_index=True)
-                            else:
-                                st.info(f"ℹ️ No valid genotype calls found in column `{sel_col}`.")
+                        if sel_col == "(Select Column)":
+                            with c_flg1:
+                                st.info(f"👆 **Action Required:** Please select the spreadsheet column for **{user_marker_name}** from the dropdown above.")
+                            with c_flg2:
+                                st.warning(f"⚪ **Status:** Biomarker **{user_marker_name}** is waiting for a column assignment. Cohort verification and QC checks will activate once selected.")
+                        else:
+                            with c_flg1:
+                                st.markdown(f"**Data Audit for `{sel_col}` ({tot_samples_col:,} valid samples):**")
+                                if observed_counts:
+                                    check_rows = []
+                                    for call, cnt in sorted(observed_counts.items(), key=lambda x: x[1], reverse=True):
+                                        pct = (cnt / tot_samples_col * 100) if tot_samples_col > 0 else 0
+                                        is_covered = call in expanded_set
+                                        if is_covered:
+                                            status_str = "✅ Permitted"
+                                        elif not raw_perm_list:
+                                            status_str = "⚪ Pending User Entry"
+                                        else:
+                                            status_str = "🚨 Flagged: Unmapped (Extra)"
+                                        check_rows.append({
+                                            'Observed Genotype': call,
+                                            'Sample Count': cnt,
+                                            'Cohort %': f"{pct:.1f}%",
+                                            'Mapping Status': status_str
+                                        })
+                                    st.dataframe(pd.DataFrame(check_rows), use_container_width=True, hide_index=True)
+                                else:
+                                    st.info(f"ℹ️ No valid genotype calls found in column `{sel_col}`.")
 
-                        with c_flg2:
-                            if not raw_perm_list:
-                                st.info(f"ℹ️ **Action Needed:** Please enter permitted genotypes for **{user_marker_name}** above (type calls or click **[⚡ Allow All]** / chip buttons).")
-                                mapping_has_errors = True
-                            elif unexpected_calls:
-                                st.markdown(f"""
-                                <div style="background: #FEF2F2; border: 1.5px solid #F87171; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
-                                    <div style="font-weight: 700; color: #991B1B; font-size: 13px;">🚨 FLAGGED: Extra / Unmapped Entry in Dataset</div>
-                                    <div style="color: #7F1D1D; font-size: 12px; margin-top: 4px;">
-                                        Found <b>{len(unexpected_calls)} unmapped call(s)</b>: <code>{unexpected_calls}</code> ({tot_unmapped_cnt:,} sample(s), {unmapped_pct:.1f}% of cohort).<br>
-                                        Permitted genotypes are: <code>{perm_val}</code>.<br>
-                                        <i>These samples will be treated as invalid/missing during QC unless you explicitly allow them.</i>
+                            with c_flg2:
+                                if not raw_perm_list:
+                                    st.info(f"ℹ️ **Action Needed:** Please enter permitted genotypes for **{user_marker_name}** above (type calls or click **[⚡ Allow All]** / chip buttons).")
+                                    mapping_has_errors = True
+                                elif unexpected_calls:
+                                    st.markdown(f"""
+                                    <div style="background: #FEF2F2; border: 1.5px solid #F87171; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+                                        <div style="font-weight: 700; color: #991B1B; font-size: 13px;">🚨 FLAGGED: Extra / Unmapped Entry in Dataset</div>
+                                        <div style="color: #7F1D1D; font-size: 12px; margin-top: 4px;">
+                                            Found <b>{len(unexpected_calls)} unmapped call(s)</b>: <code>{unexpected_calls}</code> ({tot_unmapped_cnt:,} sample(s), {unmapped_pct:.1f}% of cohort).<br>
+                                            Permitted genotypes are: <code>{perm_val}</code>.<br>
+                                            <i>These samples will be treated as invalid/missing during QC unless you explicitly allow them.</i>
+                                        </div>
                                     </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                unexp_str = ", ".join(unexpected_calls)
-                                st.button(
-                                    f"➕ Allow Flagged Call(s) ({unexp_str}) into Permitted Genotypes",
-                                    key=f"btn_add_unexp_{idx}",
-                                    on_click=cb_add_unmapped,
-                                    args=(perm_key, unexpected_calls, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
-                                )
-                            elif tot_samples_col > 0:
-                                st.markdown(f"""
-                                <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
-                                    <div style="font-weight: 700; color: #166534; font-size: 13px;">✅ 100% Cohort Verified: All {tot_samples_col:,} Samples Permitted</div>
-                                    <div style="color: #14532D; font-size: 12px; margin-top: 3px;">
-                                        All observed calls in <code>{sel_col}</code> match your configured genotype rules (<code>{', '.join(raw_perm_list)}</code>).
+                                    """, unsafe_allow_html=True)
+                                    unexp_str = ", ".join(unexpected_calls)
+                                    st.button(
+                                        f"➕ Allow Flagged Call(s) ({unexp_str}) into Permitted Genotypes",
+                                        key=f"btn_add_unexp_{idx}",
+                                        on_click=cb_add_unmapped,
+                                        args=(perm_key, unexpected_calls, ref_key, var_key, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                    )
+                                elif tot_samples_col > 0:
+                                    st.markdown(f"""
+                                    <div style="background: #F0FDF4; border: 1.5px solid #86EFAC; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+                                        <div style="font-weight: 700; color: #166534; font-size: 13px;">✅ 100% Cohort Verified: All {tot_samples_col:,} Samples Permitted</div>
+                                        <div style="color: #14532D; font-size: 12px; margin-top: 3px;">
+                                            All observed calls in <code>{sel_col}</code> match your configured genotype rules (<code>{', '.join(raw_perm_list)}</code>).
+                                        </div>
                                     </div>
-                                </div>
-                                """, unsafe_allow_html=True)
+                                    """, unsafe_allow_html=True)
 
-                            # Flag: Allele Inconsistency
-                            if (ref_mismatch or var_mismatch) and cand_r:
-                                st.markdown(f"""
-                                <div style="background: #FFFBEB; border: 1.5px solid #FCD34D; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
-                                    <div style="font-weight: 700; color: #92400E; font-size: 13px;">⚠️ FLAG: Allele Rule Inconsistency</div>
-                                    <div style="color: #78350F; font-size: 12px; margin-top: 3px;">
-                                        Configured Ref (<b>{ref_val}</b>) or Var (<b>{var_val}</b>) allele is absent from permitted genotypes. Expected alleles: Ref = <b>{cand_r}</b>, Var = <b>{cand_v}</b>.
+                                # Flag: Allele Inconsistency
+                                if (ref_mismatch or var_mismatch) and cand_r:
+                                    st.markdown(f"""
+                                    <div style="background: #FFFBEB; border: 1.5px solid #FCD34D; border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+                                        <div style="font-weight: 700; color: #92400E; font-size: 13px;">⚠️ FLAG: Allele Rule Inconsistency</div>
+                                        <div style="color: #78350F; font-size: 12px; margin-top: 3px;">
+                                            Configured Ref (<b>{ref_val}</b>) or Var (<b>{var_val}</b>) allele is absent from permitted genotypes. Expected alleles: Ref = <b>{cand_r}</b>, Var = <b>{cand_v}</b>.
+                                        </div>
                                     </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                st.button(
-                                    f"👉 Align Alleles to Ref: {cand_r}, Var: {cand_v}",
-                                    key=f"btn_align_alleles_{idx}",
-                                    on_click=cb_align_alleles,
-                                    args=(ref_key, var_key, cand_r, cand_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
-                                )
+                                    """, unsafe_allow_html=True)
+                                    st.button(
+                                        f"👉 Align Alleles to Ref: {cand_r}, Var: {cand_v}",
+                                        key=f"btn_align_alleles_{idx}",
+                                        on_click=cb_align_alleles,
+                                        args=(ref_key, var_key, cand_r, cand_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
+                                    )
 
-                            # Flag: Identical Alleles
-                            if identical_alleles:
-                                st.error(f"⛔ FLAG: Reference allele ({ref_val}) and Variant allele ({var_val}) cannot be identical!")
+                                # Flag: Identical Alleles
+                                if identical_alleles:
+                                    st.error(f"⛔ FLAG: Reference allele ({ref_val}) and Variant allele ({var_val}) cannot be identical!")
 
-                        v_al_stored = 'A' if var_val == 'None' else var_val.strip().upper()
-                        mapped_marker_dict[sel_col] = {
-                            'std_name': user_marker_name,
-                            'ref_allele': ref_val.strip().upper(),
-                            'var_allele': v_al_stored,
-                            'marker_label': user_marker_name,
-                            'permitted_genotypes': raw_perm_list
-                        }
+                        if sel_col != "(Select Column)" and sel_col in df_raw.columns:
+                            v_al_stored = 'A' if var_val == 'None' else var_val.strip().upper()
+                            mapped_marker_dict[sel_col] = {
+                                'std_name': user_marker_name,
+                                'ref_allele': ref_val.strip().upper(),
+                                'var_allele': v_al_stored,
+                                'marker_label': user_marker_name,
+                                'permitted_genotypes': raw_perm_list
+                            }
+                        else:
+                            mapping_has_errors = True
 
                     # Button to add new marker card row
                     st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
@@ -3703,7 +3715,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 c_name = st.text_input("Marker Name", value=row_item.get('marker_name', f"Marker_{r_idx+1}"), key=f"ex_name_{r_id}")
                                 row_item['marker_name'] = c_name
                             with c_r2:
-                                def_col_ex = row_item.get('col', col_options[0] if col_options else '')
+                                def_col_ex = row_item.get('col', "(Select Column)")
                                 col_idx_ex = col_options.index(def_col_ex) if def_col_ex in col_options else 0
                                 c_col = st.selectbox("Genotype Column", col_options, index=col_idx_ex, key=f"ex_col_{r_id}")
                                 row_item['col'] = c_col
@@ -3782,13 +3794,16 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 else:
                                     st.success(f"✅ All {len(ex_norm):,} samples verified for `{c_name}`.")
 
-                            mapped_marker_dict[c_col] = {
-                                'std_name': c_name,
-                                'ref_allele': c_ref,
-                                'var_allele': c_var,
-                                'marker_label': c_name,
-                                'permitted_genotypes': [g.strip().upper() for g in c_perm.split(',') if g.strip()]
-                            }
+                            if c_col and c_col != "(Select Column)" and c_col in df_raw.columns:
+                                mapped_marker_dict[c_col] = {
+                                    'std_name': c_name,
+                                    'ref_allele': c_ref,
+                                    'var_allele': c_var,
+                                    'marker_label': c_name,
+                                    'permitted_genotypes': [g.strip().upper() for g in c_perm.split(',') if g.strip()]
+                                }
+                            else:
+                                mapping_has_errors = True
 
                         if rows_to_remove:
                             for idx_to_del in sorted(rows_to_remove, reverse=True):
@@ -3803,7 +3818,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         extra_rows.append({
                             'id': f"extra_{len(extra_rows)}_{pd.Timestamp.now().strftime('%H%M%S')}",
                             'marker_name': f"Custom_Marker_{new_id}",
-                            'col': col_options[0] if col_options else '',
+                            'col': "(Select Column)",
                             'ref_allele': 'A',
                             'var_allele': 'G',
                             'permitted': ''
@@ -3828,17 +3843,17 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         cur_n = st.session_state.get(f"w_map_name_{m_idx}", s_name)
                         editor_data.append({
                             'Marker Name': cur_n,
-                            'Spreadsheet Column': cur_c if cur_c in col_options else col_options[0],
+                            'Spreadsheet Column': cur_c if (cur_c and cur_c in col_options) else "(Select Column)",
                             'Reference Allele': cur_r,
                             'Variant Allele': cur_v,
                             'Permitted Genotypes': cur_p
                         })
 
                     for r_idx, row_item in enumerate(extra_rows):
-                        cur_c_ex = row_item.get('col', col_options[0])
+                        cur_c_ex = row_item.get('col', "(Select Column)")
                         editor_data.append({
                             'Marker Name': row_item.get('marker_name', f"Custom_{r_idx+1}"),
-                            'Spreadsheet Column': cur_c_ex if cur_c_ex in col_options else col_options[0],
+                            'Spreadsheet Column': cur_c_ex if (cur_c_ex and cur_c_ex in col_options) else "(Select Column)",
                             'Reference Allele': row_item.get('ref_allele', 'A'),
                             'Variant Allele': row_item.get('var_allele', 'G'),
                             'Permitted Genotypes': row_item.get('permitted', '')
@@ -3896,7 +3911,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         m_ref = str(row_val.get('Reference Allele', 'A')).strip().upper()
                         m_var = str(row_val.get('Variant Allele', 'G')).strip().upper()
                         m_perm = str(row_val.get('Permitted Genotypes', '')).strip().upper()
-                        if m_col and m_col in df_raw.columns:
+                        if m_col and m_col != "(Select Column)" and m_col in df_raw.columns:
                             mapped_marker_dict[m_col] = {
                                 'std_name': m_name,
                                 'ref_allele': m_ref,
@@ -3904,6 +3919,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 'marker_label': m_name,
                                 'permitted_genotypes': [g.strip().upper() for g in m_perm.split(',') if g.strip()]
                             }
+                        else:
+                            mapping_has_errors = True
 
                     # Live Batch Data Verification Table
                     st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
@@ -3916,7 +3933,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         m_vr = str(r_val.get('Variant Allele', 'G')).strip().upper()
                         m_pm = str(r_val.get('Permitted Genotypes', '')).strip().upper()
 
-                        if m_cl in df_raw.columns:
+                        if m_cl and m_cl != "(Select Column)" and m_cl in df_raw.columns:
                             raw_s = df_raw[m_cl].dropna().astype(str).str.strip().str.upper()
                             valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
                             norm_c = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
@@ -3943,15 +3960,29 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 'Observed Call Breakdown': dist_str,
                                 'QC Status': status_str
                             })
+                        else:
+                            batch_check_rows.append({
+                                'Marker': m_nm,
+                                'Column': '(Not Selected)',
+                                'Ref / Var': f"{m_rf} / {m_vr}",
+                                'Permitted Combinations': m_pm,
+                                'Valid Samples': 0,
+                                'Observed Call Breakdown': 'N/A',
+                                'QC Status': '⚪ Pending Column Selection'
+                            })
 
                     if batch_check_rows:
                         st.dataframe(pd.DataFrame(batch_check_rows), use_container_width=True, hide_index=True)
 
                 # Check for Duplicate Column Mapping Conflicts
-                mapped_cols_list = list(mapped_marker_dict.keys())
+                mapped_cols_list = [c for c in mapped_marker_dict.keys() if c and c != "(Select Column)"]
                 dup_cols = {c for c in mapped_cols_list if mapped_cols_list.count(c) > 1}
                 if dup_cols:
                     st.error(f"⛔ **Duplicate Column Conflict:** Spreadsheet column(s) `{dup_cols}` are mapped to multiple markers! Each biomarker must be mapped to a distinct column.")
+                    mapping_has_errors = True
+
+                total_configured_targets = len(sel_map_markers) + len(extra_rows)
+                if len(mapped_marker_dict) < total_configured_targets:
                     mapping_has_errors = True
 
                 # Check for Identical Reference and Variant Alleles
