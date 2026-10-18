@@ -511,7 +511,7 @@ def analyze_generic_marker(series: pd.Series, marker_name: str, ref_al: str = No
     if exp_var > 0: chi2 += ((obs_var - exp_var)**2) / exp_var
     
     p_val = 1 - stats.chi2.cdf(chi2, df=1) if chi2 > 0 else 1.0
-    interp = "Departure from HWE (χ² ≥ 3.4)" if chi2 >= 3.4 else "In HWE"
+    interp = "Departure from HWE (χ² ≥ 3.841)" if chi2 >= 3.841 else "In HWE"
     
     return {
         'valid_samples': n,
@@ -1625,7 +1625,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     'Valid Samples (N)': r['Valid Samples (N)'],
                     'Observed Genotypes': r['Observed Genotypes'],
                     'Expected Genotypes': r['Expected Genotypes'],
-                    'Chi-Square (χ²)': f"⚠️ {r['_raw_chi2']:.4f} (Chi² ≥ 3.4)" if r['_raw_chi2'] >= 3.4 else f"{r['_raw_chi2']:.4f}",
+                    'Chi-Square (χ²)': f"⚠️ {r['_raw_chi2']:.4f} (Chi² ≥ 3.841)" if r['_raw_chi2'] >= 3.841 else f"{r['_raw_chi2']:.4f}",
                     'df': r['Degrees of Freedom'],
                     'P-Value': r['P-Value'],
                     'Exact P-Val': r['Exact Test P-Value']
@@ -1656,28 +1656,28 @@ def render_unified_results(full_results: dict, qc_report: dict):
             if not chi2_chart_df.empty and len(chi2_rows) > 0:
                 fig_hwe = px.bar(
                     chi2_chart_df, x='SNP', y='Chi2 Stat',
-                    title=f"HWE Chi-Square (χ²) Stats vs Threshold 3.4 ({sel_key})",
+                    title=f"HWE Chi-Square (χ²) Stats vs Threshold 3.841 ({sel_key})",
                     color='SNP',
                     color_discrete_sequence=['#2563EB', '#7C3AED', '#DB2777']
                 )
-                fig_hwe.add_hline(y=3.4, line_dash="dash", line_color="red", annotation_text="Critical Threshold (3.4)")
+                fig_hwe.add_hline(y=3.841, line_dash="dash", line_color="red", annotation_text="Critical Threshold (3.841)")
                 fig_hwe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_hwe, use_container_width=True)
             else:
                 st.info("No Chi-Square data available to plot for this cohort.")
         
         with st.expander("📖 Standard Chi-Square Distribution Cutoff Reference Table (Theoretical Distribution, df = 1)", expanded=False):
-            st.caption("ℹ️ **Theoretical Reference:** This table provides standard statistical critical values for degrees of freedom $df = 1$. It is a constant mathematical reference benchmark used to evaluate whether your cohort's calculated $\chi^2$ value above indicates Hardy-Weinberg deviation ($\chi^2 \ge 3.4$). It does not change with cohort data.")
-            chi2_ref_df = pd.DataFrame([{
-                'Level of Significance (α)': '0.50',
-                '0.10': '2.706',
-                '0.05 (Critical Threshold)': '3.4',
-                '0.02': '5.412',
-                '0.01': '6.635',
-                '0.001': '10.827'
-            }])
-            st.table(chi2_ref_df)
-            st.info("📌 **HWE Decision Rule:** If observed $\\chi^2 \\ge 3.4$ (or $P < 0.05$), the cohort significantly deviates from Hardy-Weinberg Equilibrium.")
+            st.caption("ℹ️ **Theoretical Reference:** Standard statistical critical values for degrees of freedom $df = 1$. This constant mathematical reference benchmark determines whether your cohort's calculated $\chi^2$ indicates Hardy-Weinberg deviation ($\chi^2 \ge 3.841$, corresponding to $p \le 0.05$). It does not change with cohort data.")
+            chi2_ref_df = pd.DataFrame([
+                {'Significance Level (α)': '0.50 (50%)', 'Critical Cutoff Value (χ², df=1)': '0.455', 'Interpretation & Decision Rule': 'Consistent with HWE (Random variation)'},
+                {'Significance Level (α)': '0.10 (10%)', 'Critical Cutoff Value (χ², df=1)': '2.706', 'Interpretation & Decision Rule': 'Non-significant variation (In HWE)'},
+                {'Significance Level (α)': '0.05 (5%) [Standard HWE Cutoff]', 'Critical Cutoff Value (χ², df=1)': '3.841', 'Interpretation & Decision Rule': '⚠️ Statistically Significant HWE Departure (p < 0.05)'},
+                {'Significance Level (α)': '0.02 (2%)', 'Critical Cutoff Value (χ², df=1)': '5.412', 'Interpretation & Decision Rule': '⚠️ Strong HWE Departure (p < 0.02)'},
+                {'Significance Level (α)': '0.01 (1%)', 'Critical Cutoff Value (χ², df=1)': '6.635', 'Interpretation & Decision Rule': '⚠️ Very Strong HWE Departure (p < 0.01)'},
+                {'Significance Level (α)': '0.001 (0.1%)', 'Critical Cutoff Value (χ², df=1)': '10.828', 'Interpretation & Decision Rule': '⚠️ Extremely Significant HWE Departure (p < 0.001)'},
+            ])
+            st.dataframe(chi2_ref_df, use_container_width=True, hide_index=True)
+            st.info("📌 **HWE Decision Rule:** If observed $\\chi^2 \\ge 3.841$ (or $P < 0.05$), the cohort statistically significantly deviates from Hardy-Weinberg Equilibrium.")
 
     # -------------------------------------------------------------------------
     # TAB 4: POPULATION STRATIFICATION
@@ -2330,7 +2330,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 <div style="background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.2rem; border-left: 4px solid #60A5FA; backdrop-filter: blur(8px);">
                     <div style="font-size: 0.78rem; text-transform: uppercase; color: #93C5FD; font-weight: 800; letter-spacing: 0.06em;">Statistical & HWE Engine</div>
                     <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">Chi-Square (χ²) & Haldane</div>
-                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Threshold χ² ≥ 3.4 (p ≤ 0.05)</div>
+                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Threshold χ² ≥ 3.841 (p ≤ 0.05)</div>
                 </div>
                 <div style="background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.2rem; border-left: 4px solid #FBBF24; backdrop-filter: blur(8px);">
                     <div style="font-size: 0.78rem; text-transform: uppercase; color: #FDE68A; font-weight: 800; letter-spacing: 0.06em;">Demographic Matrix</div>
@@ -2384,7 +2384,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     <h4 style="margin:0; color:#1E293B; font-weight:700; font-size:1.1rem;">Hardy–Weinberg Equilibrium Red Warning Alerts</h4>
                 </div>
                 <p style="color:#64748B; font-size:0.92rem; line-height:1.5; margin:0;">
-                    Calculates observed vs expected genotype counts and automatically highlights statistically significant HWE deviations (<code>χ² ≥ 3.4</code>) in bright red.
+                    Calculates observed vs expected genotype counts and automatically highlights statistically significant HWE deviations (<code>χ² ≥ 3.841</code>) in bright red.
                 </p>
             </div>
             <div style="background: #FFFFFF; border-radius: 12px; padding: 1.4rem; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border-top: 4px solid #D97706;">
