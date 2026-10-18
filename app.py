@@ -1314,10 +1314,13 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # TAB 1: EXECUTIVE OVERVIEW
     # -------------------------------------------------------------------------
     with tab_overview:
+        missing_count = qc_report.get('samples_with_missing_count', 0)
+        missing_pct = qc_report.get('overall_missing_pct', 0.0)
+
         k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("TOTAL SAMPLES", f"{tot_samples:,}")
         k2.metric("FULLY VALID", f"{fully_valid:,}")
-        k3.metric("MISSING GENOTYPES", "0.0%")
+        k3.metric("MISSING GENOTYPES", f"{missing_pct:.1f}% ({missing_count} samples)")
         k4.metric("DUPLICATE IDS", dup_count)
         k5.metric("INVALID GENOTYPE CALLS", invalid_count)
 
@@ -1763,8 +1766,8 @@ def render_unified_results(full_results: dict, qc_report: dict):
         q1.metric("Total Cohort Uploaded", qc_report['total_samples'])
         q2.metric("Fully Valid Samples", qc_report['fully_valid_samples'])
         q3.metric("Duplicate Sample IDs", qc_report['duplicate_sample_count'])
-        q4.metric("Invalid Genotype Calls", qc_report['invalid_genotypes_count'])
-        q5.metric("Validation Status", "PASS" if qc_report['invalid_genotypes_count'] == 0 else "WARNING")
+        q4.metric("Missing Genotypes", f"{qc_report.get('samples_with_missing_count', 0)} ({qc_report.get('overall_missing_pct', 0.0):.1f}%)")
+        q5.metric("Invalid Genotype Calls", qc_report['invalid_genotypes_count'])
         
         if qc_report['invalid_genotypes_count'] > 0:
             st.error(f"⚠️ **Warning: {qc_report['invalid_genotypes_count']} Invalid Genotype Call(s) Detected!** Invalid genotype entries were flagged and quarantined.")
