@@ -560,6 +560,29 @@ def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
             return c
     return None
 
+KNOWN_PGX_GENES = [
+    'CYP2C19', 'CYP2C9', 'CYP2D6', 'CYP3A5', 'CYP3A4', 'VKORC1', 
+    'DPYD', 'TPMT', 'NUDT15', 'SLCO1B1', 'UGT1A1', 'HLA-B', 'HLA-A', 'G6PD', 'CYP1A2', 'CYP2B6'
+]
+
+def get_column_gene(col_name: str) -> str:
+    """Returns the gene symbol found in a column header, if any."""
+    c_clean = str(col_name).upper().replace("_", "").replace("-", "").replace(" ", "")
+    for g in sorted(KNOWN_PGX_GENES, key=len, reverse=True):
+        g_clean = g.upper().replace("_", "").replace("-", "")
+        if g_clean in c_clean:
+            return g
+    return ""
+
+def detect_genes_in_columns(cols: list) -> list:
+    """Detects any known pharmacogenetic genes mentioned across column headers."""
+    found_genes = []
+    for c in cols:
+        g = get_column_gene(c)
+        if g and g not in found_genes:
+            found_genes.append(g)
+    return found_genes
+
 def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
     Intelligently aligns gene and demographic columns between base_df and new_df
@@ -2548,6 +2571,97 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         'State': chosen_state if chosen_state != "(None)" else None
                     }
 
+            # -------------------------------------------------------------------------
+            # TARGET BIOMARKER & COLUMN HEADER AUDIT (STEP 1 TARGET VS UPLOADED HEADERS)
+            # -------------------------------------------------------------------------
+            if raw_cols:
+                target_gene_active = st.session_state.get('selected_gene', 'CYP2C19')
+                target_markers_active = st.session_state.get('selected_markers', [])
+                if not target_markers_active:
+                    if target_gene_active == 'CYP2C19':
+                        target_markers_active = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                    elif target_gene_active == 'CYP2C9':
+                        target_markers_active = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
+
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+                st.markdown("#### 🎯 Target Biomarker & Header Audit")
+                st.caption(f"Verifying uploaded column headers against your Step 1 selection: Target Gene **{target_gene_active}** ({len(target_markers_active)} biomarker(s)).")
+
+                detected_file_genes = detect_genes_in_columns(raw_cols)
+                gene_mismatch = bool(detected_file_genes and target_gene_active.upper() not in [g.upper() for g in detected_file_genes])
+
+                if gene_mismatch:
+                    found_genes_str = ", ".join(detected_file_genes)
+                    st.markdown(f"""
+                    <div style="background: #FEF2F2; border: 2px solid #EF4444; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 20px;">🚨</span>
+                            <div style="font-weight: 800; color: #991B1B; font-size: 15px;">TARGET GENE & COLUMN HEADER MISMATCH DETECTED</div>
+                        </div>
+                        <div style="color: #7F1D1D; font-size: 13px; margin-top: 6px; line-height: 1.5;">
+                            In Step 1 you selected target gene: <b>{target_gene_active}</b>.<br>
+                            However, the column headers in your uploaded spreadsheet belong to: <b>{found_genes_str}</b>.<br>
+                            If you intended to analyze <b>{found_genes_str}</b>, click the button below to switch your target gene to match this dataset.
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    c_sw_btn, _ = st.columns([0.4, 0.6])
+                    with c_sw_btn:
+                        primary_detected = detected_file_genes[0]
+                        if st.button(f"👉 Switch Target Gene to {primary_detected}", type="primary", use_container_width=True, key="btn_switch_gene_step2"):
+                            st.session_state['selected_gene'] = primary_detected
+                            if primary_detected == 'CYP2C9':
+                                st.session_state['selected_markers'] = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
+                            elif primary_detected == 'CYP2C19':
+                                st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                            else:
+                                st.session_state['selected_markers'] = [f"{primary_detected}_marker1"]
+                            for k in list(st.session_state.keys()):
+                                if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
+                                    del st.session_state[k]
+                            st.rerun()
+
+                # Audit each selected marker against uploaded columns
+                audit_cols_display = []
+                for m in target_markers_active:
+                    m_base = m.split(' ')[0] if ' ' in m else m
+                    m_star = re.search(r'\*\d+[a-zA-Z]?', m)
+                    star_val = m_star.group(0).lower() if m_star else ""
+                    rs_m = re.search(r'rs\d+', m.lower())
+                    rs_val = rs_m.group(0) if rs_m else ""
+
+                    matched_col = None
+                    for c in raw_cols:
+                        c_l = str(c).lower()
+                        if target_gene_active.lower() in c_l and star_val and star_val in c_l:
+                            matched_col = c
+                            break
+                        if rs_val and rs_val in c_l:
+                            matched_col = c
+                            break
+                        if m_base.lower() in c_l:
+                            matched_col = c
+                            break
+
+                    audit_cols_display.append({
+                        'Biomarker (Step 1)': m,
+                        'Header in File': matched_col if matched_col else "❌ Not found in file",
+                        'Match Status': "✅ Header Match" if matched_col else "⚠️ Different / Missing Header"
+                    })
+
+                c_m_aud1, c_m_aud2 = st.columns([1.6, 1.4])
+                with c_m_aud1:
+                    st.dataframe(pd.DataFrame(audit_cols_display), use_container_width=True, hide_index=True)
+                with c_m_aud2:
+                    n_matched = sum(1 for a in audit_cols_display if "✅" in a['Match Status'])
+                    if n_matched == len(target_markers_active) and not gene_mismatch:
+                        st.success(f"✅ All {n_matched} selected biomarker header(s) matched in uploaded file.")
+                    elif gene_mismatch:
+                        st.error(f"🚨 **Target Gene Mismatch:** Uploaded file headers contain `{found_genes_str}`, but target gene is `{target_gene_active}`.")
+                    else:
+                        st.warning(f"⚠️ **Header Notice:** {n_matched} of {len(target_markers_active)} biomarker header(s) match file columns. You can manually map different headers in Step 3.")
+
             if st.session_state.get('pending_new_df') is not None:
                 pending_df = st.session_state['pending_new_df']
                 pending_fname = st.session_state.get('pending_file_name', 'Uploaded File')
@@ -2941,11 +3055,18 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             c_low = str(c).lower()
                             if sel_gene.lower() in c_low and star_str in c_low:
                                 return c
+                        # Only fallback to star_str if column header does NOT belong to another gene
                         for c in cols:
-                            if star_str in str(c).lower():
+                            cg = get_column_gene(c)
+                            if star_str in str(c).lower() and (not cg or cg.upper() == sel_gene.upper()):
                                 return c
 
-                    # 4. Fallback to find_default
+                    # 4. Fallback: column containing sel_gene
+                    for c in cols:
+                        if sel_gene.lower() in str(c).lower():
+                            return c
+
+                    # 5. Fallback to find_default
                     return find_default([marker_label, std_name], cols)
 
                 def get_marker_defaults(marker_label: str, sel_gene: str, detected_calls: list = None, col_name: str = ""):
@@ -3151,11 +3272,42 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 extra_rows = st.session_state.get('extra_mapping_rows', [])
 
                 # -------------------------------------------------------------------------
+                # -------------------------------------------------------------------------
                 # MODE A: INTERACTIVE MARKER CARDS (WITH LIVE DATA QC & MULTI-VALUE COMBINATIONS)
                 # -------------------------------------------------------------------------
                 if mapping_view_mode == "🗂️ Interactive Marker Cards":
                     st.markdown("#### 🧬 Biomarker Mapping & Genotype Combination Rules")
                     st.caption("Map spreadsheet columns and configure any combination of permitted genotypes (e.g. GA, GG, AG or CC, CT, TT). Check live data breakdown and verify cohort calls instantly.")
+
+                    detected_file_genes = detect_genes_in_columns(all_cols)
+                    if detected_file_genes and sel_map_gene.upper() not in [g.upper() for g in detected_file_genes]:
+                        found_genes_str = ", ".join(detected_file_genes)
+                        st.markdown(f"""
+                        <div style="background: #FEF2F2; border: 2px solid #EF4444; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="font-size: 18px;">🚨</span>
+                                <div style="font-weight: 800; color: #991B1B; font-size: 14px;">TARGET GENE & COLUMN HEADER DISCREPANCY DETECTED</div>
+                            </div>
+                            <div style="color: #7F1D1D; font-size: 13px; margin-top: 4px;">
+                                You are mapping markers for <b>{sel_map_gene}</b>, but spreadsheet column headers contain <b>{found_genes_str}</b>.<br>
+                                If you uploaded data for <b>{detected_file_genes[0]}</b>, click the button below to switch your target gene:
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        c_sw_map, _ = st.columns([0.4, 0.6])
+                        with c_sw_map:
+                            if st.button(f"👉 Switch Target Gene to {detected_file_genes[0]}", key="btn_switch_gene_step3_banner", type="primary"):
+                                st.session_state['selected_gene'] = detected_file_genes[0]
+                                if detected_file_genes[0] == 'CYP2C9':
+                                    st.session_state['selected_markers'] = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
+                                elif detected_file_genes[0] == 'CYP2C19':
+                                    st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                                else:
+                                    st.session_state['selected_markers'] = [f"{detected_file_genes[0]}_marker1"]
+                                for k in list(st.session_state.keys()):
+                                    if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
+                                        del st.session_state[k]
+                                st.rerun()
 
                     for idx, marker_label in enumerate(sel_map_markers):
                         col_key = f"w_map_col_{idx}"
@@ -3209,6 +3361,47 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
+
+                        # Check for header discrepancies (different gene, star allele, or rsID)
+                        col_gene = get_column_gene(sel_col)
+                        is_diff_gene = bool(col_gene and col_gene.upper() != sel_map_gene.upper())
+
+                        m_star = re.search(r'\*\d+[a-zA-Z]?', cur_marker_name)
+                        c_star = re.search(r'\*\d+[a-zA-Z]?', str(sel_col))
+                        is_diff_star = bool(m_star and c_star and m_star.group(0).lower() != c_star.group(0).lower())
+
+                        m_rs = re.search(r'rs\d+', cur_marker_name.lower())
+                        c_rs = re.search(r'rs\d+', str(sel_col).lower())
+                        is_diff_rs = bool(m_rs and c_rs and m_rs.group(0) != c_rs.group(0))
+
+                        if is_diff_gene:
+                            st.markdown(f"""
+                            <div style="background: #FEF2F2; border: 2px solid #EF4444; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
+                                <div style="font-weight: 800; color: #991B1B; font-size: 13px;">🚨 GENE HEADER MISMATCH: Column <code>{sel_col}</code> belongs to {col_gene}, but active gene is {sel_map_gene}!</div>
+                                <div style="color: #7F1D1D; font-size: 12px; margin-top: 3px;">
+                                    Target marker is <b>{cur_marker_name}</b> ({sel_map_gene}), but selected column <code>{sel_col}</code> represents gene <b>{col_gene}</b>.<br>
+                                    Please verify if you selected the wrong column from the dropdown above.
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        elif is_diff_star:
+                            st.markdown(f"""
+                            <div style="background: #FFFBEB; border: 2px solid #F59E0B; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
+                                <div style="font-weight: 800; color: #B45309; font-size: 13px;">⚠️ STAR ALLELE MISMATCH: Target is {m_star.group(0)}, but column header is {c_star.group(0)}!</div>
+                                <div style="color: #92400E; font-size: 12px; margin-top: 3px;">
+                                    Target marker <b>{cur_marker_name}</b> is for <b>{m_star.group(0)}</b>, but column header <code>{sel_col}</code> indicates <b>{c_star.group(0)}</b>.
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        elif is_diff_rs:
+                            st.markdown(f"""
+                            <div style="background: #FFFBEB; border: 2px solid #F59E0B; border-radius: 8px; padding: 10px 14px; margin-top: 6px; margin-bottom: 8px;">
+                                <div style="font-weight: 800; color: #B45309; font-size: 13px;">⚠️ RSID MISMATCH: Target is {m_rs.group(0)}, but column header has {c_rs.group(0)}!</div>
+                                <div style="color: #92400E; font-size: 12px; margin-top: 3px;">
+                                    Please verify if column <code>{sel_col}</code> corresponds to marker <b>{cur_marker_name}</b>.
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
 
                         c_top1, c_top2, c_top3 = st.columns([1.1, 1.5, 0.4])
                         with c_top1:
