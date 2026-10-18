@@ -1529,11 +1529,13 @@ def render_unified_results(full_results: dict, qc_report: dict):
             if snp_code in snps_data:
                 s_res = snps_data[snp_code]
                 v_cnt = s_res.get('valid_samples', 0)
-                inv_cnt = qc_report['snp_qc_stats'].get(snp_code, {}).get('invalid_samples', 0)
-                m_cnt = qc_report['snp_qc_stats'].get(snp_code, {}).get('missing_samples', 0)
+                sub_total = sel_cohort.get('sample_count', v_cnt)
+                sub_missing = max(0, sub_total - v_cnt)
+                sub_m_pct = (sub_missing / sub_total * 100.0) if sub_total > 0 else 0.0
+                inv_cnt = qc_report['snp_qc_stats'].get(snp_code, {}).get('invalid_samples', 0) if sel_key == 'Overall' else 0
                 
                 st.markdown(f"#### {snp_title}")
-                st.caption(f"Valid: {v_cnt:,} · Missing: {m_cnt} · Invalid calls: {inv_cnt}")
+                st.caption(f"Cohort Total (N): **{sub_total:,}** · Valid Genotyped: **{v_cnt:,}** · Missing Calls: **{sub_missing:,} ({sub_m_pct:.1f}%)**")
                 
                 c_tbl, c_fig = st.columns([1.1, 0.9])
                 with c_tbl:
@@ -1593,16 +1595,26 @@ def render_unified_results(full_results: dict, qc_report: dict):
         sel_key, sel_cohort = render_subcohort_pills("tab_hwe")
         snps_data = sel_cohort.get('snps', {})
         
+        cohort_total_n = sel_cohort.get('sample_count', 0)
+        
         st.markdown(f"### Hardy-Weinberg Equilibrium Audit ({sel_key} Cohort)")
+        st.caption(f"Cohort Total: **{cohort_total_n:,} samples**. HWE testing is strictly computed on valid, called genotypes. Missing or uncalled entries are excluded from allele frequency and equilibrium calculations.")
+        
         hwe_table_rows = []
         for snp_name, s_res in snps_data.items():
             hw = s_res.get('hwe', {})
             gc = s_res.get('genotype_counts', {})
             exp_c = hw.get('expected_counts', {})
             chi2_val = hw.get('chi2_stat', 0.0)
+            v_n = s_res.get('valid_samples', 0)
+            m_n = max(0, cohort_total_n - v_n)
+            m_pct = (m_n / cohort_total_n * 100.0) if cohort_total_n > 0 else 0.0
+
             hwe_table_rows.append({
                 'SNP Variant': snp_name,
-                'Valid Samples (N)': s_res.get('valid_samples', 0),
+                'Cohort Total (N)': cohort_total_n,
+                'Valid Analyzed (N)': v_n,
+                'Missing Calls': f"{m_n} ({m_pct:.1f}%)" if m_n > 0 else "0 (0.0%)",
                 'Observed Genotypes': " / ".join([f"{k}:{v}" for k, v in gc.items()]),
                 'Expected Genotypes': " / ".join([f"{k}:{exp_c.get(k, 0)}" for k in gc.keys()]),
                 '_raw_chi2': chi2_val,
@@ -1614,15 +1626,17 @@ def render_unified_results(full_results: dict, qc_report: dict):
         c_hwe_tbl, c_hwe_fig = st.columns([1.1, 0.9])
         with c_hwe_tbl:
             HWE_HEADERS = [
-                'SNP Variant', 'Valid Samples (N)', 'Observed Genotypes', 
-                'Expected Genotypes', 'Chi-Square (χ²)', 'df', 'P-Value', 'Exact P-Val'
+                'SNP Variant', 'Cohort Total (N)', 'Valid Analyzed (N)', 'Missing Calls',
+                'Observed Genotypes', 'Expected Genotypes', 'Chi-Square (χ²)', 'df', 'P-Value', 'Exact P-Val'
             ]
             if not hwe_table_rows:
                 hwe_df = pd.DataFrame(columns=HWE_HEADERS)
             else:
                 hwe_df = pd.DataFrame([{
                     'SNP Variant': r['SNP Variant'],
-                    'Valid Samples (N)': r['Valid Samples (N)'],
+                    'Cohort Total (N)': r['Cohort Total (N)'],
+                    'Valid Analyzed (N)': r['Valid Analyzed (N)'],
+                    'Missing Calls': r['Missing Calls'],
                     'Observed Genotypes': r['Observed Genotypes'],
                     'Expected Genotypes': r['Expected Genotypes'],
                     'Chi-Square (χ²)': f"⚠️ {r['_raw_chi2']:.4f} (Chi² ≥ 3.841)" if r['_raw_chi2'] >= 3.841 else f"{r['_raw_chi2']:.4f}",
