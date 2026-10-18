@@ -561,28 +561,23 @@ def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
             return c
     return None
 
-KNOWN_PGX_GENES = [
-    'CYP2C19', 'CYP2C9', 'CYP2D6', 'CYP3A5', 'CYP3A4', 'VKORC1', 
-    'DPYD', 'TPMT', 'NUDT15', 'SLCO1B1', 'UGT1A1', 'HLA-B', 'HLA-A', 'G6PD', 'CYP1A2', 'CYP2B6'
-]
+from core.gene_utils import KNOWN_PGX_GENES, get_column_gene, detect_genes_in_columns, get_default_markers_for_gene
 
-def get_column_gene(col_name: str) -> str:
-    """Returns the gene symbol found in a column header, if any."""
-    c_clean = str(col_name).upper().replace("_", "").replace("-", "").replace(" ", "")
-    for g in sorted(KNOWN_PGX_GENES, key=len, reverse=True):
-        g_clean = g.upper().replace("_", "").replace("-", "")
-        if g_clean in c_clean:
-            return g
-    return ""
-
-def detect_genes_in_columns(cols: list) -> list:
-    """Detects any known pharmacogenetic genes mentioned across column headers."""
-    found_genes = []
-    for c in cols:
-        g = get_column_gene(c)
-        if g and g not in found_genes:
-            found_genes.append(g)
-    return found_genes
+def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: pd.DataFrame = None):
+    """Sets active target gene and its markers across session state and synchronizes all widget keys."""
+    gene_u = str(gene_symbol).strip().upper()
+    if markers is None:
+        markers = get_default_markers_for_gene(gene_u, catalog_df)
+    st.session_state['selected_gene'] = gene_u
+    st.session_state['selected_markers'] = list(markers)
+    # Clear stale widget keys so dropdowns cleanly re-initialize to the new target
+    for k in ['step1_sel_gene', 'step1_sel_markers', 'map_step_gene_sel', 'map_step_marker_sel']:
+        if k in st.session_state:
+            del st.session_state[k]
+    # Clear old column mapping keys
+    for k in list(st.session_state.keys()):
+        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
+            del st.session_state[k]
 
 def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
@@ -2263,23 +2258,18 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 curr_gene = 'CYP2C19' if 'CYP2C19' in gene_list else gene_list[0]
             g_idx = gene_list.index(curr_gene)
 
+            if 'step1_sel_gene' in st.session_state and st.session_state['step1_sel_gene'] != curr_gene:
+                del st.session_state['step1_sel_gene']
+
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:
                 sel_gene = st.selectbox("1️⃣ Select Target Gene:", gene_list, index=g_idx, key="step1_sel_gene")
                 if sel_gene != st.session_state.get('selected_gene'):
-                    st.session_state['selected_gene'] = sel_gene
-                    st.session_state['selected_markers'] = []
+                    set_active_target_gene(sel_gene, catalog_df=catalog_df)
                     st.rerun()
 
             with c_g2:
-                if sel_gene == 'CYP2C19':
-                    base_markers = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
-                elif sel_gene == 'CYP2C9':
-                    base_markers = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
-                else:
-                    raw_ms = catalog_df[catalog_df['Gene'] == sel_gene]['Marker'].tolist() if not catalog_df.empty else []
-                    base_markers = raw_ms if raw_ms else [f"{sel_gene}_marker1"]
-
+                base_markers = get_default_markers_for_gene(sel_gene, catalog_df)
                 custom_m_for_gene = st.session_state.get('custom_markers', {}).get(sel_gene, [])
                 available_markers = []
                 for m in base_markers + custom_m_for_gene:
@@ -2287,10 +2277,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         available_markers.append(m)
 
                 curr_selected = st.session_state.get('selected_markers')
-                if curr_selected is not None:
+                if curr_selected:
                     valid_defaults = [m for m in curr_selected if m in available_markers]
                 else:
                     valid_defaults = available_markers
+
+                if 'step1_sel_markers' in st.session_state:
+                    if any(m not in available_markers for m in st.session_state['step1_sel_markers']):
+                        del st.session_state['step1_sel_markers']
 
                 sel_markers = st.multiselect(
                     f"2️⃣ Select Biomarker(s) for {sel_gene}:",
@@ -2343,8 +2337,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             c_markers_dict[in_new_gene] = current_m
                             st.session_state['custom_markers'] = c_markers_dict
 
-                            st.session_state['selected_gene'] = in_new_gene
-                            st.session_state['selected_markers'] = current_m
+                            set_active_target_gene(in_new_gene, markers=current_m, catalog_df=catalog_df)
                             st.success(f"Successfully added **{in_new_gene}** ({', '.join(current_m)}) to your active targets!")
                             st.rerun()
 
@@ -2355,8 +2348,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if st.button("🗑️ Clear Custom Targets", key="btn_clear_custom_targets_step1"):
                             st.session_state['custom_genes'] = []
                             st.session_state['custom_markers'] = {}
-                            st.session_state['selected_gene'] = 'CYP2C19'
-                            st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                            set_active_target_gene('CYP2C19', catalog_df=catalog_df)
                             st.rerun()
 
             # Active Target Summary Card
@@ -2578,11 +2570,23 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             if raw_cols:
                 target_gene_active = st.session_state.get('selected_gene', 'CYP2C19')
                 target_markers_active = st.session_state.get('selected_markers', [])
+
+                # Auto-heal target gene if selected markers belong to a different gene
+                if target_markers_active:
+                    m_genes = []
+                    for m in target_markers_active:
+                        dg = detect_genes_in_columns([m])
+                        if dg:
+                            m_genes.extend(dg)
+                    if m_genes and all(g.upper() == m_genes[0].upper() for g in m_genes):
+                        inferred_gene = m_genes[0]
+                        if target_gene_active.upper() != inferred_gene.upper():
+                            set_active_target_gene(inferred_gene, markers=target_markers_active, catalog_df=catalog_df)
+                            target_gene_active = inferred_gene
+
                 if not target_markers_active:
-                    if target_gene_active == 'CYP2C19':
-                        target_markers_active = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
-                    elif target_gene_active == 'CYP2C9':
-                        target_markers_active = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
+                    target_markers_active = get_default_markers_for_gene(target_gene_active, catalog_df)
+                    st.session_state['selected_markers'] = target_markers_active
 
                 st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
                 st.markdown("#### 🎯 Target Biomarker & Header Audit")
@@ -2611,16 +2615,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     with c_sw_btn:
                         primary_detected = detected_file_genes[0]
                         if st.button(f"👉 Switch Target Gene to {primary_detected}", type="primary", use_container_width=True, key="btn_switch_gene_step2"):
-                            st.session_state['selected_gene'] = primary_detected
-                            if primary_detected == 'CYP2C9':
-                                st.session_state['selected_markers'] = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
-                            elif primary_detected == 'CYP2C19':
-                                st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
-                            else:
-                                st.session_state['selected_markers'] = [f"{primary_detected}_marker1"]
-                            for k in list(st.session_state.keys()):
-                                if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
-                                    del st.session_state[k]
+                            set_active_target_gene(primary_detected, catalog_df=catalog_df)
                             st.rerun()
 
                 # Audit each selected marker against uploaded columns
@@ -2853,24 +2848,19 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 curr_gene = 'CYP2C19' if 'CYP2C19' in all_catalog_genes else all_catalog_genes[0]
             g_idx = all_catalog_genes.index(curr_gene)
 
+            if 'map_step_gene_sel' in st.session_state and st.session_state['map_step_gene_sel'] != curr_gene:
+                del st.session_state['map_step_gene_sel']
+
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:
                 sel_map_gene = st.selectbox("1️⃣ Select Target Gene:", all_catalog_genes, index=g_idx, key="map_step_gene_sel")
                 if sel_map_gene != st.session_state.get('selected_gene'):
-                    st.session_state['selected_gene'] = sel_map_gene
-                    st.session_state['selected_markers'] = []
+                    set_active_target_gene(sel_map_gene, catalog_df=catalog_df)
                     st.rerun()
 
             with c_g2:
                 # Dynamic list of markers for the chosen gene
-                if sel_map_gene == 'CYP2C19':
-                    base_markers = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
-                elif sel_map_gene == 'CYP2C9':
-                    base_markers = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
-                else:
-                    raw_ms = catalog_df[catalog_df['Gene'] == sel_map_gene]['Marker'].tolist() if not catalog_df.empty else []
-                    base_markers = raw_ms if raw_ms else [f"{sel_map_gene}_marker1"]
-
+                base_markers = get_default_markers_for_gene(sel_map_gene, catalog_df)
                 custom_m_for_gene = st.session_state.get('custom_markers', {}).get(sel_map_gene, [])
                 available_markers = []
                 for m in base_markers + custom_m_for_gene:
@@ -2879,10 +2869,14 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 # Ensure default selections
                 curr_selected = st.session_state.get('selected_markers')
-                if curr_selected is not None:
+                if curr_selected:
                     valid_defaults = [m for m in curr_selected if m in available_markers]
                 else:
                     valid_defaults = available_markers
+
+                if 'map_step_marker_sel' in st.session_state:
+                    if any(m not in available_markers for m in st.session_state['map_step_marker_sel']):
+                        del st.session_state['map_step_marker_sel']
 
                 sel_map_markers = st.multiselect(
                     f"2️⃣ Select Biomarker(s) for {sel_map_gene}:",
@@ -2935,8 +2929,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             c_markers_dict[in_new_gene_3] = current_m
                             st.session_state['custom_markers'] = c_markers_dict
 
-                            st.session_state['selected_gene'] = in_new_gene_3
-                            st.session_state['selected_markers'] = current_m
+                            set_active_target_gene(in_new_gene_3, markers=current_m, catalog_df=catalog_df)
                             st.success(f"Successfully added **{in_new_gene_3}** ({', '.join(current_m)}) to your active targets!")
                             st.rerun()
 
@@ -2947,8 +2940,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if st.button("🗑️ Clear Custom Targets", key="btn_clear_custom_targets_step3"):
                             st.session_state['custom_genes'] = []
                             st.session_state['custom_markers'] = {}
-                            st.session_state['selected_gene'] = 'CYP2C19'
-                            st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
+                            set_active_target_gene('CYP2C19', catalog_df=catalog_df)
                             st.rerun()
 
             if not sel_map_markers:
@@ -3102,11 +3094,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 # Define callbacks to update widget session state safely before widgets instantiate
                 def cb_switch_target_gene(new_g, new_markers):
-                    st.session_state['selected_gene'] = new_g
-                    st.session_state['selected_markers'] = new_markers[:3] if new_markers else [f"{new_g}_marker1"]
-                    for k in list(st.session_state.keys()):
-                        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
-                            del st.session_state[k]
+                    set_active_target_gene(new_g, markers=new_markers, catalog_df=catalog_df)
 
                 def cb_remove_marker_card(idx_to_remove):
                     cur_markers = list(st.session_state.get('selected_markers', []))
@@ -3298,16 +3286,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         c_sw_map, _ = st.columns([0.4, 0.6])
                         with c_sw_map:
                             if st.button(f"👉 Switch Target Gene to {detected_file_genes[0]}", key="btn_switch_gene_step3_banner", type="primary"):
-                                st.session_state['selected_gene'] = detected_file_genes[0]
-                                if detected_file_genes[0] == 'CYP2C9':
-                                    st.session_state['selected_markers'] = ['CYP2C9*2 (rs1799853)', 'CYP2C9*3 (rs1057910)']
-                                elif detected_file_genes[0] == 'CYP2C19':
-                                    st.session_state['selected_markers'] = ['CYP2C19*2 (rs4244285)', 'CYP2C19*3 (rs4986893)', 'CYP2C19*17 (rs12248560)']
-                                else:
-                                    st.session_state['selected_markers'] = [f"{detected_file_genes[0]}_marker1"]
-                                for k in list(st.session_state.keys()):
-                                    if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_')):
-                                        del st.session_state[k]
+                                set_active_target_gene(detected_file_genes[0], catalog_df=catalog_df)
                                 st.rerun()
 
                     for idx, marker_label in enumerate(sel_map_markers):
