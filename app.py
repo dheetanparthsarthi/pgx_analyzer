@@ -23,9 +23,8 @@ import plotly.graph_objects as go
 import os
 import io
 import re
-from collections import Counter
 from scipy import stats
-
+import pickle
 import importlib
 import core.qc
 try:
@@ -321,6 +320,50 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # -----------------------------------------------------------------------------
 DELETED_FLAG_FILE = ".data_deleted.flag"
 ACTIVE_DATASET_CACHE = ".active_dataset.pkl"
+ACTIVE_SESSION_CACHE = ".active_session_state.pkl"
+
+def save_active_session():
+    """Saves workflow state and gene/marker selections to disk so they survive page refreshes."""
+    if st.session_state.get('is_deleted', False):
+        return
+    up_df = st.session_state.get('uploaded_df')
+    has_df = up_df is not None and len(up_df) > 0
+    state_to_save = {
+        'workflow_step': st.session_state.get('workflow_step', '4 · Results' if has_df else '1 · Select Target'),
+        'selected_gene': st.session_state.get('selected_gene'),
+        'selected_markers': st.session_state.get('selected_markers', []),
+        'mapped_cols': st.session_state.get('mapped_cols', {}),
+        'demographic_mapping': st.session_state.get('demographic_mapping', {}),
+        'custom_snp_rules': st.session_state.get('custom_snp_rules', {}),
+        'mapped_marker_details': st.session_state.get('mapped_marker_details', {}),
+        'custom_genes': st.session_state.get('custom_genes', []),
+        'custom_markers': st.session_state.get('custom_markers', {}),
+        'active_ds_name': st.session_state.get('active_ds_name'),
+        'active_sheet_name': st.session_state.get('active_sheet_name'),
+        'extra_mapping_rows': st.session_state.get('extra_mapping_rows', []),
+        'mapping_view_mode': st.session_state.get('mapping_view_mode', '🗂️ Interactive Marker Cards (with Live QC)')
+    }
+    try:
+        with open(ACTIVE_SESSION_CACHE, 'wb') as f:
+            pickle.dump(state_to_save, f)
+    except Exception:
+        pass
+
+def load_persisted_session():
+    """Restores saved workflow step, gene, and mappings on page reload/refresh."""
+    if os.path.exists(ACTIVE_SESSION_CACHE) and not st.session_state.get('is_deleted', False):
+        try:
+            with open(ACTIVE_SESSION_CACHE, 'rb') as f:
+                saved = pickle.load(f)
+            if isinstance(saved, dict):
+                for k, v in saved.items():
+                    if v is not None:
+                        if k not in st.session_state or st.session_state[k] is None or st.session_state[k] == {} or st.session_state[k] == []:
+                            st.session_state[k] = v
+                        elif k == 'workflow_step' and st.session_state.get('workflow_step') == '1 · Select Target':
+                            st.session_state['workflow_step'] = v
+        except Exception:
+            pass
 
 def save_active_dataset(df: pd.DataFrame):
     """Saves active dataset to disk so it persists across page reloads and browser refreshes."""
@@ -329,6 +372,7 @@ def save_active_dataset(df: pd.DataFrame):
             df.to_pickle(ACTIVE_DATASET_CACHE)
         except Exception:
             pass
+    save_active_session()
 
 def load_persisted_dataset() -> pd.DataFrame:
     """Loads dataset from persistent disk cache file if present."""
@@ -340,12 +384,13 @@ def load_persisted_dataset() -> pd.DataFrame:
     return None
 
 def clear_active_dataset_cache():
-    """Removes persistent dataset cache file."""
-    if os.path.exists(ACTIVE_DATASET_CACHE):
-        try:
-            os.remove(ACTIVE_DATASET_CACHE)
-        except Exception:
-            pass
+    """Removes persistent dataset and session cache files."""
+    for fn in [ACTIVE_DATASET_CACHE, ACTIVE_SESSION_CACHE]:
+        if os.path.exists(fn):
+            try:
+                os.remove(fn)
+            except Exception:
+                pass
 
 if os.path.exists(DELETED_FLAG_FILE):
     st.session_state['is_deleted'] = True
@@ -397,13 +442,13 @@ if 'mapped_marker_details' not in st.session_state:
 
 EMPTY_COLS = []
 
-# Auto-restore active dataset from disk cache if session state was cleared by a page reload/refresh
-if not st.session_state.get('is_deleted', False) and (st.session_state.get('uploaded_df') is None or len(st.session_state['uploaded_df']) == 0):
-    persisted_df = load_persisted_dataset()
-    if persisted_df is not None and len(persisted_df) > 0:
-        st.session_state['uploaded_df'] = persisted_df
-        if 'workflow_step' not in st.session_state:
-            st.session_state['workflow_step'] = '1 · Select Target'
+# Auto-restore active dataset & session state from disk cache if session state was cleared by a page reload/refresh
+if not st.session_state.get('is_deleted', False):
+    if st.session_state.get('uploaded_df') is None or len(st.session_state['uploaded_df']) == 0:
+        persisted_df = load_persisted_dataset()
+        if persisted_df is not None and len(persisted_df) > 0:
+            st.session_state['uploaded_df'] = persisted_df
+    load_persisted_session()
 
 if st.session_state.get('uploaded_df') is None:
     st.session_state['uploaded_df'] = pd.DataFrame()
@@ -602,6 +647,7 @@ def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: p
     for k in list(st.session_state.keys()):
         if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_', '_mapped_', '_col_tracker_')):
             del st.session_state[k]
+    save_active_session()
 
 def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
@@ -841,7 +887,7 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     # -------------------------------------------------------------------------
     # STUDIO CONTAINER & HEADER (CLEAN, COMPACT TYPOGRAPHY)
     # -------------------------------------------------------------------------
-    target_gene = full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+    target_gene = st.session_state.get('selected_gene') or full_results.get('target_gene') or full_results.get('active_gene') or 'CYP2C19'
     st.markdown(f"""
     <div style="border-top: 1px solid #E2E8F0; margin-top: 1.5rem; padding-top: 1rem; margin-bottom: 0.75rem;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -1333,7 +1379,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
             st.rerun()
         st.divider()
 
-    active_gene = full_results.get('active_gene') or full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+    active_gene = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
     active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG, **st.session_state.get('custom_snp_rules', {})}
     ov = full_results['overall']
     active_markers = list(ov.get('snps', {}).keys())
@@ -1735,6 +1781,8 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # TAB 5: CYP2C19 CALLING
     # -------------------------------------------------------------------------
     with tab_pgx:
+        st.markdown(f"### 💊 {active_gene} Calling & Translation")
+        st.caption(f"Pharmacogenomic diplotype and metabolizer phenotype translation for target gene **{active_gene}**.")
         sel_key, sel_cohort = render_subcohort_pills("tab_pgx")
         pgx = sel_cohort.get('pgx_summary') or sel_cohort.get('cyp2c9_summary') or sel_cohort.get('cyp2c19_summary', {})
         dips = pgx.get('diplotypes', {})
@@ -4362,7 +4410,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         # STEP 4: RESULTS (GENE & BIOMARKER INTERACTIVE VISUALIZATION STUDIO)
         # -------------------------------------------------------------------------
         elif st.session_state['workflow_step'] == '4 · Results':
-            active_gene = full_results.get('active_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+            active_gene = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
 
             # Render Full Analytical Platform dynamically for Any Target Gene
             render_unified_results(full_results, qc_report)
@@ -4425,7 +4473,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         key="btn_res_full_dl_csv"
                     )
 
-            target_gene_lbl = full_results.get('active_gene') or full_results.get('target_gene') or st.session_state.get('selected_gene', 'CYP2C19')
+            target_gene_lbl = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
             st.markdown(f"""
             <div class="footer-disclaimer-text">
                 PGx Pop MVP · {target_gene_lbl} calling uses a standardized CPIC-aligned unphased-genotype heuristic — see notes in the {target_gene_lbl} tab · Not for clinical use without independent validation.
@@ -4436,6 +4484,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 # MAIN WORKFLOW EXECUTION
 # -----------------------------------------------------------------------------
 render_workflow_pipeline(df_raw, full_results, qc_report)
+save_active_session()
 
 # -----------------------------------------------------------------------------
 # FOOTER NOTE
