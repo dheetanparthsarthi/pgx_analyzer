@@ -4,14 +4,14 @@ Comprehensive Multi-Page Streamlit SaaS Application
 
 Full implementation of the 12-Section Specification:
 1. Title & Aim
-2. Input Data Normalization (CYP2C19*2 rs4244285, CYP2C19*3 rs4986893, CYP2C19*17 rs12248560)
+2. Input Data Normalization from uploaded gene, marker, allele, and genotype selections
 3. Visual Welcome Landing Screen with Interactive Manual Data Entry Form & File Upload
 4. Data Quality Control (QC) & Missing Values Audit with Invalid Genotype Call Detection & Warnings
 5. Genotype Counts & Allele Frequency Engine (p & q calculation, Homogenous vs Heterogenous Zygosity)
 6. Hardy-Weinberg Equilibrium Engine (Chi2, P-Value, Haldane Exact Test, Table 3 Reference)
-7. Geographic Population Groups (South India, North India, East India, West India, Central India)
-8. Dedicated State-Wise Analysis Pages (Individual State Profiles)
-9. CYP2C19 Star Allele, Diplotype Calling & CPIC Phenotype Classification (UM, RM, NM, IM, PM)
+7. Geographic Population Groups derived from mapped dataset columns
+8. State-Wise Analysis Pages derived from uploaded location values
+9. Rule-based Diplotype and Phenotype Classification for configured genes
 10. Live Report Preview & Multi-Format Exporter (Excel, CSV, PDF)
 """
 
@@ -26,6 +26,7 @@ import re
 from collections import Counter
 from scipy import stats
 import pickle
+import json
 import importlib
 import core.qc
 try:
@@ -336,6 +337,7 @@ def save_active_session():
         'mapped_cols': st.session_state.get('mapped_cols', {}),
         'demographic_mapping': st.session_state.get('demographic_mapping', {}),
         'custom_snp_rules': st.session_state.get('custom_snp_rules', {}),
+        'custom_translation_rules': st.session_state.get('custom_translation_rules', {}),
         'mapped_marker_details': st.session_state.get('mapped_marker_details', {}),
         'custom_genes': st.session_state.get('custom_genes', []),
         'custom_markers': st.session_state.get('custom_markers', {}),
@@ -463,6 +465,9 @@ if 'mapping_view_mode' not in st.session_state:
 
 if 'custom_snp_rules' not in st.session_state:
     st.session_state['custom_snp_rules'] = {}
+
+if 'custom_translation_rules' not in st.session_state:
+    st.session_state['custom_translation_rules'] = {}
 
 if 'mapped_marker_details' not in st.session_state:
     st.session_state['mapped_marker_details'] = {}
@@ -594,7 +599,7 @@ def analyze_generic_marker(series: pd.Series, marker_name: str, ref_al: str = No
     if exp_var > 0: chi2 += ((obs_var - exp_var)**2) / exp_var
     
     p_val = 1 - stats.chi2.cdf(chi2, df=1) if chi2 > 0 else 1.0
-    interp = "Departure from HWE (χ² ≥ 3.841)" if chi2 >= 3.841 else "In HWE"
+    interp = "Departure from HWE" if p_val < 0.05 else "In HWE"
     
     return {
         'valid_samples': n,
@@ -774,6 +779,7 @@ def reset_all_data():
     st.session_state['selected_markers'] = []
     st.session_state['mapped_cols'] = {}
     st.session_state['demographic_mapping'] = {}
+    st.session_state['custom_translation_rules'] = {}
     st.session_state['datasets_dict'] = {}
     st.session_state['last_uploaded_file_id'] = None
     st.session_state['pending_new_df'] = None
@@ -807,9 +813,10 @@ def reset_all_data():
 
 # High performance in-memory cached analysis execution pipeline
 @st.cache_data(show_spinner=False)
-def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tuple: tuple = (), active_gene: str = None):
+def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tuple: tuple = (), active_gene: str = None, translation_rules_json: str = '{}'):
     mapped_dict = dict(mapped_cols_tuple)
     snp_rules = {k: dict(v) for k, v in snp_rules_tuple} if snp_rules_tuple else None
+    translation_rules = json.loads(translation_rules_json) if translation_rules_json else {}
     if df is None or len(df) == 0:
         clean_df = pd.DataFrame()
         qc_report = {
@@ -847,7 +854,7 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple, snp_rules_tupl
             except Exception:
                 pass
     clean_df, qc_report = qc_engine.run_qc()
-    full_results = DemographicStratifier.stratify_and_analyze(clean_df, custom_snp_rules=snp_rules, active_gene=active_gene)
+    full_results = DemographicStratifier.stratify_and_analyze(clean_df, custom_snp_rules=snp_rules, active_gene=active_gene, custom_translation_rules=translation_rules)
     return clean_df, qc_report, full_results
 
 # Execute Pipeline
@@ -870,8 +877,9 @@ def serialize_rules(rules_dict):
 
 snp_rules_items = serialize_rules(st.session_state.get('custom_snp_rules', {}))
 df_cols_detected = detect_genes_in_columns(list(df_raw.columns)) if df_raw is not None and not df_raw.empty else []
-active_gene_to_run = st.session_state.get('selected_gene') or (df_cols_detected[0] if df_cols_detected else 'CYP2C19')
-clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items, active_gene=active_gene_to_run)
+active_gene_to_run = st.session_state.get('selected_gene') or (df_cols_detected[0] if df_cols_detected else 'Custom')
+translation_rules_json = json.dumps(st.session_state.get('custom_translation_rules', {}), sort_keys=True)
+clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items, active_gene=active_gene_to_run, translation_rules_json=translation_rules_json)
 processed_df = full_results.get('processed_dataframe', pd.DataFrame())
 
 # Helper to check active dataset state
@@ -947,12 +955,12 @@ with st.sidebar:
             )
 
 # -----------------------------------------------------------------------------
-# CYP2C19 COMBINATION & GEOGRAPHIC STUDIO (DOWNSIDE OF TAB 5)
+# GENE-AGNOSTIC COMBINATION & GEOGRAPHIC STUDIO
 # -----------------------------------------------------------------------------
 def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: dict, view_mode: str = "All Views"):
     """
-    Renders interactive CYP2C19 Multi-SNP Combination, Diplotype, Phenotype,
-    and Geographic/State-Wise matrices with active, working scientific rsID nomenclature.
+    Renders genotype combination and geographic/state summaries for the markers
+    selected from the active dataset.
     """
     if processed_df is None or processed_df.empty:
         st.info("No pharmacogenomic data available for combination analysis.")
@@ -961,17 +969,17 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     # -------------------------------------------------------------------------
     # STUDIO CONTAINER & HEADER (CLEAN, COMPACT TYPOGRAPHY)
     # -------------------------------------------------------------------------
-    target_gene = st.session_state.get('selected_gene') or full_results.get('target_gene') or full_results.get('active_gene') or 'CYP2C19'
+    target_gene = st.session_state.get('selected_gene') or full_results.get('target_gene') or full_results.get('active_gene') or 'Custom'
     st.markdown(f"""
     <div style="border-top: 1px solid #E2E8F0; margin-top: 1.5rem; padding-top: 1rem; margin-bottom: 0.75rem;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
             <div>
                 <span style="font-size: 16px; font-weight: 700; color: #0F172A;">🧩 {target_gene} Multi-Variant & Geographic Studio</span>
-                <span style="margin-left: 8px; font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 7px; border-radius: 4px; border: 1px solid #CBD5E1;">CPIC / PharmGKB</span>
+                <span style="margin-left: 8px; font-size: 11px; font-weight: 600; background: #EEF2F6; color: #334155; padding: 2px 7px; border-radius: 4px; border: 1px solid #CBD5E1;">Dataset Rules</span>
             </div>
         </div>
         <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748B;">
-            Standardized multi-locus genotype stratification, scientific nomenclature mapping, and sub-population distribution analysis.
+            Genotype combination and sub-population distribution analysis for the selected markers.
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -979,114 +987,27 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     # -------------------------------------------------------------------------
     # 1. VARIANT COMBINATION FOCUS SELECTOR (DYNAMIC ACROSS GENES)
     # -------------------------------------------------------------------------
-    mapped_snps_in_df = [c for c in full_results.get('snps', {}).keys() if c in processed_df.columns]
+    mapped_snps_in_df = [
+        marker for marker in full_results.get('overall', {}).get('snps', {})
+        if marker in processed_df.columns
+    ]
     if not mapped_snps_in_df:
-        mapped_snps_in_df = [c for c in processed_df.columns if c not in [
-            'Sample_ID', 'Gender_Clean', 'Gender', 'State_Clean', 'State', 
-            'Native_Place_Clean', 'Native_Place', 'Region', 'Diplotype', 
-            'Phenotype', 'Activity_Score', 'Test_Requested', 'Date_of_Birth'
-        ]]
-
-    target_gene_upper = str(target_gene).strip().upper() if target_gene else ""
-    cyp2c19_markers_present = [c for c in ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17'] if c in processed_df.columns]
-    cyp2c9_markers_present = [c for c in ['CYP2C9*2', 'CYP2C9*3'] if c in processed_df.columns]
-
-    if 'CYP2C9' in target_gene_upper:
-        if len(cyp2c9_markers_present) >= 2:
-            st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
-            avail_options = ["CYP2C9 *2 + *3 (c.430C>T / c.1075A>C · Decreased Function Panel)"]
-            variant_combo_choice = st.radio(
-                "Variant Combination:",
-                avail_options,
-                horizontal=True,
-                key="studio_variant_combo_choice_cyp2c9",
-                label_visibility="collapsed"
-            )
-            active_snps = ['CYP2C9*2', 'CYP2C9*3']
-            combo_title = "CYP2C9 *2 + *3"
-            std_snps_label = "c.430C>T & c.1075A>C"
-            rs_label = "rs1799853 + rs1057910"
-        elif len(cyp2c9_markers_present) == 1:
-            active_snps = cyp2c9_markers_present
-            combo_title = cyp2c9_markers_present[0]
-            std_snps_label = "Single-Marker Analysis"
-            rs_label = combo_title
-        else:
-            active_snps = mapped_snps_in_df
-            combo_title = f"{target_gene} ({' + '.join(active_snps)})" if active_snps else target_gene
-            std_snps_label = f"{len(active_snps)}-Marker Panel"
-            rs_label = combo_title
-    elif 'CYP2C19' in target_gene_upper:
-        if len(cyp2c19_markers_present) >= 2:
-            st.markdown("<div style='font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;'>1️⃣ Select Variant Combination to Analyze:</div>", unsafe_allow_html=True)
-            avail_options = []
-            if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*3' in cyp2c19_markers_present:
-                avail_options.append("CYP2C19 *2 + *3 (c.681G>A / c.636G>A · Loss of Function)")
-            if 'CYP2C19*2' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
-                avail_options.append("CYP2C19 *2 + *17 (c.681G>A / c.-806C>T · LOF + Increased Function)")
-            if 'CYP2C19*3' in cyp2c19_markers_present and 'CYP2C19*17' in cyp2c19_markers_present:
-                avail_options.append("CYP2C19 *3 + *17 (c.636G>A / c.-806C>T · LOF + Increased Function)")
-            if len(cyp2c19_markers_present) == 3:
-                avail_options.append("CYP2C19 Core Panel (*2 + *3 + *17 · Full 3-Locus Trio)")
-            if not avail_options:
-                avail_options = [f"CYP2C19 Panel ({' + '.join(cyp2c19_markers_present)})"]
-
-            variant_combo_choice = st.radio(
-                "Variant Combination:",
-                avail_options,
-                horizontal=True,
-                key="studio_variant_combo_choice",
-                label_visibility="collapsed"
-            )
-            if "*2 + *3 + *17" in variant_combo_choice or "Core Panel" in variant_combo_choice:
-                active_snps = ['CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17']
-                combo_title = "CYP2C19 *2 + *3 + *17"
-                std_snps_label = "c.681G>A, c.636G>A & c.-806C>T"
-                rs_label = "rs4244285 + rs4986893 + rs12248560"
-            elif "*2 + *3" in variant_combo_choice:
-                active_snps = ['CYP2C19*2', 'CYP2C19*3']
-                combo_title = "CYP2C19 *2 + *3"
-                std_snps_label = "c.681G>A & c.636G>A"
-                rs_label = "rs4244285 + rs4986893"
-            elif "*2 + *17" in variant_combo_choice:
-                active_snps = ['CYP2C19*2', 'CYP2C19*17']
-                combo_title = "CYP2C19 *2 + *17"
-                std_snps_label = "c.681G>A & c.-806C>T"
-                rs_label = "rs4244285 + rs12248560"
-            elif "*3 + *17" in variant_combo_choice:
-                active_snps = ['CYP2C19*3', 'CYP2C19*17']
-                combo_title = "CYP2C19 *3 + *17"
-                std_snps_label = "c.636G>A & c.-806C>T"
-                rs_label = "rs4986893 + rs12248560"
-            else:
-                active_snps = cyp2c19_markers_present
-                combo_title = " + ".join(active_snps)
-                std_snps_label = f"{len(active_snps)}-Locus Panel"
-                rs_label = combo_title
-        elif len(cyp2c19_markers_present) == 1:
-            active_snps = cyp2c19_markers_present
-            combo_title = cyp2c19_markers_present[0]
-            std_snps_label = "Single-Marker Analysis"
-            rs_label = combo_title
-        else:
-            active_snps = mapped_snps_in_df
-            combo_title = f"{target_gene} ({' + '.join(active_snps)})" if active_snps else target_gene
-            std_snps_label = f"{len(active_snps)}-Marker Panel"
-            rs_label = combo_title
-    elif len(mapped_snps_in_df) >= 1:
-        active_snps = mapped_snps_in_df
-        if len(active_snps) == 1:
-            combo_title = f"{target_gene} ({active_snps[0]})"
-            std_snps_label = "Single-Marker Analysis"
-            rs_label = active_snps[0]
-        else:
-            combo_title = f"{target_gene} ({' + '.join(active_snps)})"
-            std_snps_label = f"{len(active_snps)}-Marker Panel"
-            rs_label = " + ".join(active_snps)
-        st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin-bottom: 6px;'>1️⃣ Analyzed Multi-Locus Panel: <b>{combo_title}</b></div>", unsafe_allow_html=True)
-    else:
+        mapped_snps_in_df = [marker for marker in full_results.get('markers', []) if marker in processed_df.columns]
+    if not mapped_snps_in_df:
         st.info("ℹ️ Multi-Locus Combination Studio requires at least one mapped marker column with valid genotype calls.")
         return
+
+    active_snps = st.multiselect(
+        "Markers to include in the combination analysis:",
+        options=mapped_snps_in_df,
+        default=mapped_snps_in_df,
+        key=f"studio_active_markers_{re.sub(r'[^A-Za-z0-9]+', '_', str(target_gene))}",
+    )
+    if not active_snps:
+        st.info("Select at least one mapped marker to calculate genotype combinations.")
+        return
+    combo_title = " + ".join(active_snps)
+    std_snps_label = f"{len(active_snps)} selected marker{'s' if len(active_snps) != 1 else ''}"
 
     active_snps = [c for c in active_snps if c in processed_df.columns]
     if not active_snps:
@@ -1098,13 +1019,13 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     # -------------------------------------------------------------------------
     # 2. GEOGRAPHIC LEVEL, SPECIFIC DRILL-DOWN, AND NOMENCLATURE FORMAT
     # -------------------------------------------------------------------------
-    c_geo, c_specific, c_nom = st.columns([1.1, 1.4, 1.1])
+    c_geo, c_specific = st.columns([1.1, 1.4])
 
     with c_geo:
-        default_scope_idx = 1 if "Geographical" in view_mode else 0
+        default_scope_idx = 1 if "Geographic" in view_mode else 0
         geo_scope = st.selectbox(
             "🌍 Geographic Level:",
-            ["🌐 Overall Cohort (Pan-India)", "🗺️ Geographical Regions", "📍 State-Wise Profiles"],
+            ["🌐 Overall Cohort", "🗺️ Geographic Groups", "📍 State / Locality Groups"],
             index=default_scope_idx,
             key="studio_geo_scope"
         )
@@ -1113,7 +1034,7 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     selected_state = "All States (Comparative Overview)"
 
     with c_specific:
-        if "Geographical Regions" in geo_scope:
+        if "Geographic Groups" in geo_scope:
             region_list = ["All Regions (Comparative Overview)"]
             if 'Region' in processed_df.columns:
                 unique_regs = sorted([str(r) for r in processed_df['Region'].dropna().unique() if str(r).strip() != ''])
@@ -1123,7 +1044,7 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
                 region_list,
                 key="studio_sel_region"
             )
-        elif "State-Wise Profiles" in geo_scope:
+        elif "State / Locality Groups" in geo_scope:
             state_list = ["All States (Comparative Overview)"]
             if state_col and state_col in processed_df.columns:
                 unique_states = sorted([str(s) for s in processed_df[state_col].dropna().unique() if str(s).strip() != ''])
@@ -1136,19 +1057,10 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
         else:
             st.selectbox(
                 "📍 Stratification Status:",
-                ["Pan-Cohort (All 28 States & UTs Included)"],
+                ["All uploaded samples included"],
                 disabled=True,
                 key="studio_disabled_geo"
             )
-
-    with c_nom:
-        nomenclature = st.selectbox(
-            "🔬 Nomenclature Format:",
-            ["🧬 Star-Allele (*2, *3, *17)", "🔬 Scientific rsID (NCBI / HGVS)"],
-            key="studio_nomenclature"
-        )
-
-    is_sci = "Scientific" in nomenclature
 
     # -------------------------------------------------------------------------
     # 3. DYNAMIC DATA FILTERING BASED ON GEOGRAPHY / STATE
@@ -1156,13 +1068,13 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     active_df = processed_df.copy()
     scope_label = "Overall Cohort"
 
-    if "Geographical Regions" in geo_scope:
+    if "Geographic Groups" in geo_scope:
         if selected_region != "All Regions (Comparative Overview)":
             active_df = active_df[active_df['Region'].astype(str) == str(selected_region)]
             scope_label = f"Region: {selected_region}"
         else:
             scope_label = "All Regions (Comparative)"
-    elif "State-Wise Profiles" in geo_scope:
+    elif "State / Locality Groups" in geo_scope:
         if selected_state != "All States (Comparative Overview)" and state_col:
             active_df = active_df[active_df[state_col].astype(str) == str(selected_state)]
             scope_label = f"State: {selected_state}"
@@ -1310,127 +1222,51 @@ def render_cyp2c19_combination_studio(processed_df: pd.DataFrame, full_results: 
     # -------------------------------------------------------------------------
     # 5. GEOGRAPHICAL & STATE-WISE BREAKDOWN CHARTS & TABLES
     # -------------------------------------------------------------------------
-    if "Geographical Regions" in geo_scope:
+    if "Geographic Groups" in geo_scope:
+        st.markdown(f"#### Geographic Group Comparison for {combo_title}")
         if selected_region != "All Regions (Comparative Overview)":
-            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>🗺️ State Breakdown within {selected_region} (N = {tot_cohort})</div>", unsafe_allow_html=True)
-            if state_col and state_col in active_df.columns:
-                st_counts = active_df[state_col].value_counts().reset_index()
-                st_counts.columns = ['State', 'Patients (N)']
-                if len(st_counts) > 1:
-                    fig_st_reg = px.bar(
-                        st_counts, x='State', y='Patients (N)',
-                        title=f"State Distribution in {selected_region}",
-                        color='Patients (N)',
-                        color_continuous_scale='Greens'
-                    )
-                    fig_st_reg.update_layout(
-                        height=260, margin=dict(l=10, r=10, t=30, b=10),
-                        title_font=dict(size=12, color='#0F172A'),
-                        xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
-                    )
-                    st.plotly_chart(fig_st_reg, use_container_width=True)
-                else:
-                    st.caption(f"All {tot_cohort} samples in `{selected_region}` are from State: **{st_counts.iloc[0]['State']}**.")
+            location_subset = processed_df[processed_df['Region'].astype(str) == str(selected_region)] if 'Region' in processed_df.columns else pd.DataFrame()
+            if state_col and state_col in location_subset.columns:
+                location_counts = location_subset[state_col].value_counts().rename_axis('State / Locality').reset_index(name='Samples')
+                st.dataframe(location_counts, use_container_width=True, hide_index=True)
+        elif 'Region' in processed_df.columns:
+            pattern_series = processed_df[active_snps].apply(lambda row: " + ".join(row.astype(str)), axis=1)
+            st.dataframe(pd.crosstab(processed_df['Region'], pattern_series, margins=True, margins_name="Total"), use_container_width=True)
+            region_patterns = processed_df.assign(_pattern=pattern_series).groupby(['Region', '_pattern']).size().reset_index(name='Samples')
+            fig_region = px.bar(region_patterns, x='Region', y='Samples', color='_pattern', barmode='stack', title=f"Genotype Combinations by Geographic Group ({combo_title})", color_discrete_sequence=px.colors.qualitative.Safe)
+            st.plotly_chart(fig_region, use_container_width=True)
         else:
-            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>🗺️ Regional Cross-Comparison for {combo_title} Across India</div>", unsafe_allow_html=True)
-            if 'Region' in processed_df.columns:
-                pattern_series = processed_df[active_snps].apply(lambda r: " + ".join(r.astype(str)), axis=1)
-                pivot_reg = pd.crosstab(processed_df['Region'], pattern_series, margins=True, margins_name="Total")
-                st.dataframe(pivot_reg, use_container_width=True)
-
-                reg_agg = processed_df.groupby(['Region'] + active_snps).size().reset_index(name='Patients (N)')
-                reg_agg['Pattern'] = reg_agg[active_snps].apply(lambda r: " + ".join(r.astype(str)), axis=1)
-                fig_reg_bar = px.bar(
-                    reg_agg, x='Region', y='Patients (N)', color='Pattern',
-                    barmode='stack', title=f"Regional Composition of {combo_title} (Stacked)",
-                    color_discrete_sequence=['#166534', '#1E40AF', '#D97706', '#991B1B', '#0D9488', '#6B21A8']
-                )
-                fig_reg_bar.update_layout(
-                    height=280, margin=dict(l=10, r=10, t=30, b=10),
-                    title_font=dict(size=12, color='#0F172A'),
-                    xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
-                )
-                st.plotly_chart(fig_reg_bar, use_container_width=True)
-
-    elif "State-Wise Profiles" in geo_scope:
-        if selected_state != "All States (Comparative Overview)":
-            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>📍 State Profile: {selected_state} (N = {tot_cohort})</div>", unsafe_allow_html=True)
-            if 'Gender_Clean' in active_df.columns or 'Gender' in active_df.columns:
-                g_col = 'Gender_Clean' if 'Gender_Clean' in active_df.columns else 'Gender'
-                g_counts = active_df[g_col].value_counts().reset_index()
-                g_counts.columns = ['Gender', 'Count']
-                fig_g = px.pie(g_counts, names='Gender', values='Count', hole=0.45, title=f"Gender Distribution in {selected_state}")
-                fig_g.update_layout(height=240, margin=dict(l=10, r=10, t=30, b=10), title_font=dict(size=12))
-                st.plotly_chart(fig_g, use_container_width=True)
+            st.info("Map a geographic group column during upload to compare uploaded groups.")
+    elif "State / Locality Groups" in geo_scope:
+        st.markdown(f"#### State / Locality Analysis for {combo_title}")
+        if selected_state != "All States (Comparative Overview)" and state_col and state_col in active_df.columns:
+            group_col = 'Gender_Clean' if 'Gender_Clean' in active_df.columns else ('Gender' if 'Gender' in active_df.columns else None)
+            if group_col:
+                group_counts = active_df[group_col].value_counts().rename_axis('Population Group').reset_index(name='Samples')
+                st.dataframe(group_counts, use_container_width=True, hide_index=True)
+        elif state_col and state_col in processed_df.columns:
+            pattern_series = processed_df[active_snps].apply(lambda row: " + ".join(row.astype(str)), axis=1)
+            st.dataframe(pd.crosstab(processed_df[state_col], pattern_series, margins=True, margins_name="Total"), use_container_width=True)
+            state_counts = processed_df[state_col].value_counts().rename_axis('State / Locality').reset_index(name='Samples').head(10)
+            fig_state = px.bar(state_counts, x='State / Locality', y='Samples', title="State / Locality Group Sizes", color='State / Locality', color_discrete_sequence=px.colors.qualitative.Safe)
+            st.plotly_chart(fig_state, use_container_width=True)
         else:
-            st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 12px 0 6px 0;'>📍 State Cross-Tabulation & Top States by Cohort Size</div>", unsafe_allow_html=True)
-            if state_col and state_col in processed_df.columns:
-                pattern_series = processed_df[active_snps].apply(lambda r: " + ".join(r.astype(str)), axis=1)
-                pivot_st = pd.crosstab(processed_df[state_col], pattern_series, margins=True, margins_name="Total")
-                st.dataframe(pivot_st, use_container_width=True)
-
-                st_counts = processed_df[state_col].value_counts().head(10).reset_index()
-                st_counts.columns = ['State', 'Total Patients']
-                fig_st = px.bar(
-                    st_counts, x='State', y='Total Patients',
-                    title="Top 10 Indian States by Cohort Size",
-                    color='Total Patients',
-                    color_continuous_scale='Greens'
-                )
-                fig_st.update_layout(
-                    height=280, margin=dict(l=10, r=10, t=30, b=10),
-                    title_font=dict(size=12, color='#0F172A'),
-                    xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
-                )
-                st.plotly_chart(fig_st, use_container_width=True)
-
-    else:
-        if 'Region' in processed_df.columns:
-            reg_counts = processed_df['Region'].value_counts().reset_index()
-            reg_counts.columns = ['Region', 'Patients (N)']
-            fig_reg_ov = px.bar(
-                reg_counts, x='Region', y='Patients (N)',
-                title="Pan-Indian Regional Population Distribution",
-                color='Region',
-                color_discrete_sequence=px.colors.qualitative.Set2
-            )
-            fig_reg_ov.update_layout(
-                height=250, margin=dict(l=10, r=10, t=30, b=10),
-                title_font=dict(size=12, color='#0F172A'),
-                xaxis=dict(tickfont=dict(size=11)), yaxis=dict(tickfont=dict(size=11))
-            )
-            st.plotly_chart(fig_reg_ov, use_container_width=True)
+            st.info("Map a state or locality column during upload to compare state-wise groups.")
+    elif 'Region' in processed_df.columns:
+        region_counts = processed_df['Region'].value_counts().rename_axis('Geographic Group').reset_index(name='Samples')
+        fig_region = px.bar(region_counts, x='Geographic Group', y='Samples', title="Uploaded Geographic Group Distribution", color='Geographic Group', color_discrete_sequence=px.colors.qualitative.Safe)
+        st.plotly_chart(fig_region, use_container_width=True)
 
     # -------------------------------------------------------------------------
     # 6. STATISTICAL COMBINATION TABLE (STANDARDIZED SCIENTIFIC HEADERS)
     # -------------------------------------------------------------------------
     st.markdown(f"<div style='font-size: 13px; font-weight: 600; color: #1E293B; margin: 14px 0 6px 0;'>📋 Statistical Combination Table — {combo_title} ({scope_label})</div>", unsafe_allow_html=True)
 
-    table_display = combo_grp.copy()
-    if is_sci:
-        rename_dict = {
-            'CYP2C19*2': 'rs4244285 (*2, c.681G>A)',
-            'CYP2C19*3': 'rs4986893 (*3, c.636G>A)',
-            'CYP2C19*17': 'rs12248560 (*17, c.-806C>T)',
-            'CYP2C9*2': 'rs1799853 (*2, c.430C>T)',
-            'CYP2C9*3': 'rs1057910 (*3, c.1075A>C)',
-            'Combination Pattern': 'Multi-Locus Pattern',
-            'Sample Count (N)': 'Samples (N)',
-            'CPIC Phenotype(s)': 'CPIC Clinical Phenotype'
-        }
-        table_display = table_display.rename(columns=rename_dict)
-    else:
-        rename_dict = {
-            'CYP2C19*2': 'CYP2C19*2 (c.681G>A)',
-            'CYP2C19*3': 'CYP2C19*3 (c.636G>A)',
-            'CYP2C19*17': 'CYP2C19*17 (c.-806C>T)',
-            'CYP2C9*2': 'CYP2C9*2 (c.430C>T)',
-            'CYP2C9*3': 'CYP2C9*3 (c.1075A>C)',
-            'Combination Pattern': 'Genotype Combination',
-            'Sample Count (N)': 'Samples (N)',
-            'CPIC Phenotype(s)': 'CPIC Clinical Phenotype'
-        }
-        table_display = table_display.rename(columns=rename_dict)
+    table_display = combo_grp.rename(columns={
+        'Combination Pattern': 'Genotype Combination',
+        'Sample Count (N)': 'Samples (N)',
+        'CPIC Phenotype(s)': 'Configured Phenotype'
+    })
 
     disp_cols = [c for c in table_display.columns if c != 'pct_val']
     st.dataframe(table_display[disp_cols], use_container_width=True, hide_index=True)
@@ -1482,7 +1318,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
     # Dynamic target gene detection: prioritized by selected_gene, then dataset headers, then full_results
     cur_uploaded = st.session_state.get('uploaded_df')
     detected_cols_gene = detect_genes_in_columns(list(cur_uploaded.columns)) if cur_uploaded is not None and not cur_uploaded.empty else []
-    active_gene = st.session_state.get('selected_gene') or (detected_cols_gene[0] if detected_cols_gene else None) or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
+    active_gene = st.session_state.get('selected_gene') or (detected_cols_gene[0] if detected_cols_gene else None) or full_results.get('active_gene') or full_results.get('target_gene') or 'Custom'
     active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG, **st.session_state.get('custom_snp_rules', {})}
     ov = full_results['overall']
     active_markers = list(ov.get('snps', {}).keys())
@@ -1513,18 +1349,6 @@ def render_unified_results(full_results: dict, qc_report: dict):
         "📍 Dedicated State Profiles"
     ])
 
-    # Cohort Dictionary for Sub-cohort Filtering
-    cohort_dict = {
-        'Overall': full_results.get('overall', {}),
-        'South India': full_results.get('regional', {}).get('South India', {}),
-        'North India': full_results.get('regional', {}).get('North India', {}),
-        'East India': full_results.get('regional', {}).get('East India', {}),
-        'West India': full_results.get('regional', {}).get('West India', {}),
-        'Central India': full_results.get('regional', {}).get('Central India', {}),
-        'Female': full_results.get('gender', {}).get('Female', {}),
-        'Male': full_results.get('gender', {}).get('Male', {})
-    }
-
     # Helper for Sub-cohort & State-Wise Filter UI
     def render_subcohort_pills(key_prefix):
         st_dict = full_results.get('state_wise', {})
@@ -1541,9 +1365,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
 
         with c_sub:
             if filter_mode == "🗺️ Geographic Region":
-                reg_names = [r for r in ['South India', 'North India', 'East India', 'West India', 'Central India'] if reg_dict.get(r, {}).get('sample_count', 0) > 0]
-                if not reg_names:
-                    reg_names = list(reg_dict.keys())
+                reg_names = sorted(r for r, item in reg_dict.items() if item.get('sample_count', 0) > 0)
                 reg_options = [f"{r} (n={reg_dict.get(r, {}).get('sample_count', 0):,})" for r in reg_names]
                 if reg_options:
                     selected_reg_str = st.selectbox("Select Geographic Region:", reg_options, key=f"{key_prefix}_sel_region")
@@ -1606,19 +1428,21 @@ def render_unified_results(full_results: dict, qc_report: dict):
         with c_ov1:
             st.markdown(f"### 🏆 {active_gene} Phenotype Summary")
             pgx = ov.get('pgx_summary') or ov.get('cyp2c9_summary') or ov.get('cyp2c19_summary', {})
-            phe_dict = pgx.get('phenotypes', {})
+            phe_dict = {k: v for k, v in pgx.get('phenotypes', {}).items() if k != 'Not configured'}
             phe_df = pd.DataFrame([{'Phenotype Category': k, 'Count': v['count'], 'Percentage': f"{v['percentage']:.1f}%"} for k, v in phe_dict.items() if v['count'] > 0])
-            st.table(phe_df)
-
-            fig_ov_phe = px.pie(
-                names=[k for k, v in phe_dict.items() if v['count'] > 0],
-                values=[v['count'] for k, v in phe_dict.items() if v['count'] > 0],
-                hole=0.45,
-                title="Overall Phenotype Distribution",
-                color_discrete_sequence=['#166534', '#1E40AF', '#4B5563', '#991B1B', '#D97706', '#0D9488']
-            )
-            fig_ov_phe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
-            st.plotly_chart(fig_ov_phe, use_container_width=True)
+            if not phe_df.empty:
+                st.table(phe_df)
+                fig_ov_phe = px.pie(
+                    names=[k for k, v in phe_dict.items() if v['count'] > 0],
+                    values=[v['count'] for k, v in phe_dict.items() if v['count'] > 0],
+                    hole=0.45,
+                    title="Overall Phenotype Distribution",
+                    color_discrete_sequence=px.colors.qualitative.Safe
+                )
+                fig_ov_phe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
+                st.plotly_chart(fig_ov_phe, use_container_width=True)
+            else:
+                st.info("Phenotype classification is unavailable until validated translation rules are configured for this gene and marker panel.")
 
         with c_ov2:
             st.markdown("### 🌐 Regional Sample Distribution")
@@ -1747,7 +1571,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
         cohort_total_n = sel_cohort.get('sample_count', 0)
         
         st.markdown(f"### Hardy-Weinberg Equilibrium Audit ({sel_key} Cohort)")
-        st.caption(f"Cohort Total: **{cohort_total_n:,} samples**. HWE testing is strictly computed on valid, called genotypes. Missing or uncalled entries are excluded from allele frequency and equilibrium calculations.")
+        st.caption(f"Cohort Total: **{cohort_total_n:,} samples**. HWE uses valid, called genotypes only; the decision p-value uses the exact test when expected genotype counts are small and the chi-square test otherwise.")
         
         hwe_table_rows = []
         for snp_name, s_res in snps_data.items():
@@ -1769,14 +1593,17 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 '_raw_chi2': chi2_val,
                 'Degrees of Freedom': hw.get('df', 1),
                 'P-Value': f"{hw.get('p_value', 1.0):.4f}",
-                'Exact Test P-Value': f"{hw.get('exact_p_value', 1.0):.4f}"
+                'Decision P-Value': f"{hw.get('decision_p_value', hw.get('p_value', 1.0)):.4f}",
+                'Exact Test P-Value': f"{hw.get('exact_p_value', 1.0):.4f}",
+                'HWE Interpretation': hw.get('interpretation', 'Not available')
             })
             
         c_hwe_tbl, c_hwe_fig = st.columns([1.1, 0.9])
         with c_hwe_tbl:
             HWE_HEADERS = [
                 'SNP Variant', 'Cohort Total (N)', 'Valid Analyzed (N)', 'Missing Calls',
-                'Observed Genotypes', 'Expected Genotypes', 'Chi-Square (χ²)', 'df', 'P-Value', 'Exact P-Val'
+                'Observed Genotypes', 'Expected Genotypes', 'Chi-Square (χ²)', 'df', 'P-Value',
+                'Decision P-Value', 'Exact P-Val', 'HWE Interpretation'
             ]
             if not hwe_table_rows:
                 hwe_df = pd.DataFrame(columns=HWE_HEADERS)
@@ -1788,14 +1615,16 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     'Missing Calls': r['Missing Calls'],
                     'Observed Genotypes': r['Observed Genotypes'],
                     'Expected Genotypes': r['Expected Genotypes'],
-                    'Chi-Square (χ²)': f"⚠️ {r['_raw_chi2']:.4f} (Chi² ≥ 3.841)" if r['_raw_chi2'] >= 3.841 else f"{r['_raw_chi2']:.4f}",
+                    'Chi-Square (χ²)': f"⚠️ {r['_raw_chi2']:.4f}" if r['HWE Interpretation'] == 'Departure from HWE' else f"{r['_raw_chi2']:.4f}",
                     'df': r['Degrees of Freedom'],
                     'P-Value': r['P-Value'],
-                    'Exact P-Val': r['Exact Test P-Value']
+                    'Decision P-Value': r['Decision P-Value'],
+                    'Exact P-Val': r['Exact Test P-Value'],
+                    'HWE Interpretation': r['HWE Interpretation']
                 } for r in hwe_table_rows])
 
             def style_hwe_chi2(val):
-                if '⚠️' in str(val) or 'Chi²' in str(val):
+                if '⚠️' in str(val):
                     return 'background-color: #FEE2E2; color: #DC2626; font-weight: bold; border-radius: 4px;'
                 return 'color: #166534; font-weight: 600;'
 
@@ -1819,18 +1648,21 @@ def render_unified_results(full_results: dict, qc_report: dict):
             if not chi2_chart_df.empty and len(chi2_rows) > 0:
                 fig_hwe = px.bar(
                     chi2_chart_df, x='SNP', y='Chi2 Stat',
-                    title=f"HWE Chi-Square (χ²) Stats vs Threshold 3.841 ({sel_key})",
+                    title=f"HWE Chi-Square (χ²) by Marker ({sel_key})",
                     color='SNP',
                     color_discrete_sequence=['#2563EB', '#7C3AED', '#DB2777']
                 )
-                fig_hwe.add_hline(y=3.841, line_dash="dash", line_color="red", annotation_text="Critical Threshold (3.841)")
+                if {s_res.get('hwe', {}).get('df', 1) for s_res in snps_data.values()} == {1}:
+                    fig_hwe.add_hline(y=3.841, line_dash="dash", line_color="red", annotation_text="α = 0.05 (df = 1)")
+                else:
+                    st.caption("Critical values vary by degrees of freedom. Monomorphic markers have df = 0 and are reported as not informative for HWE.")
                 fig_hwe.update_layout(height=260, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_hwe, use_container_width=True)
             else:
                 st.info("No Chi-Square data available to plot for this cohort.")
         
         with st.expander("📖 Standard Chi-Square Distribution Cutoff Reference Table (Theoretical Distribution, df = 1)", expanded=False):
-            st.caption("ℹ️ **Theoretical Reference:** Standard statistical critical values for degrees of freedom $df = 1$. This constant mathematical reference benchmark determines whether your cohort's calculated $\\chi^2$ indicates Hardy-Weinberg deviation ($\\chi^2 \\ge 3.841$, corresponding to $p \\le 0.05$). It does not change with cohort data.")
+            st.caption("ℹ️ **Theoretical Reference:** These critical values apply to a chi-square test with df = 1. The decision p-value shown above uses the exact HWE test when expected genotype counts are small; monomorphic markers have df = 0 and HWE is not informative.")
             chi2_ref_df = pd.DataFrame([
                 {'Significance Level (α)': '0.50 (50%)', 'Critical Cutoff Value (χ², df=1)': '0.455', 'Interpretation & Decision Rule': 'Consistent with HWE (Random variation)'},
                 {'Significance Level (α)': '0.10 (10%)', 'Critical Cutoff Value (χ², df=1)': '2.706', 'Interpretation & Decision Rule': 'Non-significant variation (In HWE)'},
@@ -1840,7 +1672,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 {'Significance Level (α)': '0.001 (0.1%)', 'Critical Cutoff Value (χ², df=1)': '10.828', 'Interpretation & Decision Rule': '⚠️ Extremely Significant HWE Departure (p < 0.001)'},
             ])
             st.dataframe(chi2_ref_df, use_container_width=True, hide_index=True)
-            st.info("📌 **HWE Decision Rule:** If observed $\\chi^2 \\ge 3.841$ (or $P < 0.05$), the cohort statistically significantly deviates from Hardy-Weinberg Equilibrium.")
+            st.info("📌 Use the displayed HWE interpretation and decision p-value for each marker. The 3.841 cutoff applies only to the asymptotic df = 1 chi-square reference.")
 
     # -------------------------------------------------------------------------
     # TAB 4: POPULATION STRATIFICATION
@@ -1851,16 +1683,13 @@ def render_unified_results(full_results: dict, qc_report: dict):
         gen_dict = full_results.get('gender', {})
         tot_n = ov['sample_count']
         
-        group_rows = [
-            {'GROUP': 'Overall', 'N': tot_n, '% OF TOTAL': '100.0%'},
-            {'GROUP': 'Region — South India', 'N': reg_dict.get('South India', {}).get('sample_count', 0), '% OF TOTAL': f"{(reg_dict.get('South India', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-            {'GROUP': 'Region — North India', 'N': reg_dict.get('North India', {}).get('sample_count', 0), '% OF TOTAL': f"{(reg_dict.get('North India', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-            {'GROUP': 'Region — East India', 'N': reg_dict.get('East India', {}).get('sample_count', 0), '% OF TOTAL': f"{(reg_dict.get('East India', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-            {'GROUP': 'Region — West India', 'N': reg_dict.get('West India', {}).get('sample_count', 0), '% OF TOTAL': f"{(reg_dict.get('West India', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-            {'GROUP': 'Region — Central India', 'N': reg_dict.get('Central India', {}).get('sample_count', 0), '% OF TOTAL': f"{(reg_dict.get('Central India', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-            {'GROUP': 'Gender — Female', 'N': gen_dict.get('Female', {}).get('sample_count', 0), '% OF TOTAL': f"{(gen_dict.get('Female', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-            {'GROUP': 'Gender — Male', 'N': gen_dict.get('Male', {}).get('sample_count', 0), '% OF TOTAL': f"{(gen_dict.get('Male', {}).get('sample_count', 0)/tot_n*100):.1f}%" if tot_n>0 else "0%"},
-        ]
+        group_rows = [{'GROUP': 'Overall', 'N': tot_n, '% OF TOTAL': '100.0%'}]
+        for group_name, group_data in reg_dict.items():
+            group_n = group_data.get('sample_count', 0)
+            group_rows.append({'GROUP': f'Region — {group_name}', 'N': group_n, '% OF TOTAL': f"{group_n / tot_n * 100:.1f}%" if tot_n else '0.0%'})
+        for group_name, group_data in gen_dict.items():
+            group_n = group_data.get('sample_count', 0)
+            group_rows.append({'GROUP': f'Gender — {group_name}', 'N': group_n, '% OF TOTAL': f"{group_n / tot_n * 100:.1f}%" if tot_n else '0.0%'})
         
         c_pop1, c_pop2 = st.columns([1.0, 1.0])
         with c_pop1:
@@ -1944,15 +1773,103 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 st.caption(f"Skipped markers without usable biallelic variation: {', '.join(pca_info['skipped_markers'])}")
 
     # -------------------------------------------------------------------------
-    # TAB 5: CYP2C19 CALLING
+    # TAB 5: GENE-AGNOSTIC PGx CALLING
     # -------------------------------------------------------------------------
     with tab_pgx:
         st.markdown(f"### 💊 {active_gene} Calling & Translation")
         st.caption(f"Pharmacogenomic diplotype and metabolizer phenotype translation for target gene **{active_gene}**.")
         sel_key, sel_cohort = render_subcohort_pills("tab_pgx")
         pgx = sel_cohort.get('pgx_summary') or sel_cohort.get('cyp2c9_summary') or sel_cohort.get('cyp2c19_summary', {})
-        dips = pgx.get('diplotypes', {})
-        phenos = pgx.get('phenotypes', {})
+        dips = {k: v for k, v in pgx.get('diplotypes', {}).items() if k != 'Not configured'}
+        phenos = {k: v for k, v in pgx.get('phenotypes', {}).items() if k != 'Not configured'}
+
+        # Unknown genes and user-selected marker panels need explicit, reviewable
+        # translation rules. Generate dosage patterns from this dataset; never
+        # invent clinical diplotype or phenotype labels from genotype values.
+        with st.expander("⚙️ Configure diplotype and phenotype rules for this gene", expanded=(not bool(pgx.get('translation_configured')) or pgx.get('valid_pharmacogenomic_samples', 0) == 0)):
+            st.caption("Observed marker dosage patterns are calculated from the selected alleles and uploaded genotypes. Enter your validated diplotype and phenotype for each pattern; unconfigured patterns remain indeterminate.")
+            dosage_maps = {}
+            for marker in active_markers:
+                marker_rule = active_snp_conf.get(marker, {}) or {}
+                ref_allele = str(marker_rule.get('ref_allele', '')).strip().upper()
+                var_allele = str(marker_rule.get('var_allele', '')).strip().upper()
+                if not ref_allele or not var_allele or ref_allele == var_allele:
+                    continue
+                dosage_maps[marker] = {
+                    f"{ref_allele}{ref_allele}": 0,
+                    f"{ref_allele}{var_allele}": 1,
+                    f"{var_allele}{ref_allele}": 1,
+                    f"{var_allele}{var_allele}": 2,
+                }
+
+            pattern_counts = Counter()
+            if dosage_maps and not processed_df.empty:
+                for _, sample in processed_df.iterrows():
+                    dosages = []
+                    for marker in dosage_maps:
+                        raw_call = sample.get(marker)
+                        if pd.isna(raw_call):
+                            dosages = []
+                            break
+                        call = str(raw_call).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
+                        dosage = dosage_maps[marker].get(call)
+                        if dosage is None and len(call) == 2:
+                            dosage = dosage_maps[marker].get(call[::-1])
+                        if dosage is None:
+                            dosages = []
+                            break
+                        dosages.append(dosage)
+                    if dosages:
+                        pattern_counts[','.join(map(str, dosages))] += 1
+
+            if not dosage_maps:
+                st.info("Define distinct reference and variant alleles for at least one mapped marker before building translation patterns. Monomorphic markers remain available for population statistics.")
+            elif not pattern_counts:
+                st.info("No complete, permitted genotype patterns were found for the selected markers.")
+            else:
+                st.write("Marker order used in each dosage pattern:", ", ".join(dosage_maps))
+                pattern_rows = []
+                existing_custom = st.session_state.get('custom_translation_rules', {}).get(str(active_gene).upper(), {})
+                old_diplotype_rules = existing_custom.get('diplotype_rules', {})
+                old_phenotype_map = existing_custom.get('phenotype_map', {})
+                with st.form(f"translation_rules_form_{re.sub(r'[^A-Za-z0-9]+', '_', str(active_gene))}"):
+                    st.markdown("**Observed dosage pattern · sample count · diplotype · phenotype**")
+                    for pattern, count in sorted(pattern_counts.items()):
+                        previous_diplotype = old_diplotype_rules.get(pattern, '')
+                        previous_phenotype = old_phenotype_map.get(previous_diplotype, '')
+                        c_pattern, c_count, c_diplotype, c_phenotype = st.columns([1.25, 0.6, 1.1, 1.2])
+                        c_pattern.write(pattern)
+                        c_count.write(f"{count:,}")
+                        gene_key = re.sub(r'[^A-Za-z0-9]+', '_', str(active_gene))
+                        pattern_key = pattern.replace(',', '_')
+                        diplotype_value = c_diplotype.text_input("Diplotype", value=previous_diplotype, key=f"rule_diplotype_{gene_key}_{pattern_key}", label_visibility="collapsed", placeholder="e.g. *1/*2")
+                        phenotype_value = c_phenotype.text_input("Phenotype", value=previous_phenotype, key=f"rule_phenotype_{gene_key}_{pattern_key}", label_visibility="collapsed", placeholder="e.g. Intermediate")
+                        pattern_rows.append((pattern, diplotype_value.strip(), phenotype_value.strip()))
+                    save_rules = st.form_submit_button("Save translation rules and recalculate", type="primary")
+                if save_rules:
+                    diplotype_rules = {pattern: diplotype for pattern, diplotype, _ in pattern_rows if diplotype}
+                    phenotype_map = {diplotype: phenotype for _, diplotype, phenotype in pattern_rows if diplotype and phenotype}
+                    missing_phenotypes = [pattern for pattern, diplotype, phenotype in pattern_rows if diplotype and not phenotype]
+                    conflicting_phenotypes = any(
+                        len({phenotype for _, dip, phenotype in pattern_rows if dip == diplotype and phenotype}) > 1
+                        for diplotype in set(diplotype_rules.values())
+                    )
+                    if not diplotype_rules or missing_phenotypes or conflicting_phenotypes:
+                        st.error("Enter both a diplotype and phenotype for every dosage pattern you want classified.")
+                    else:
+                        st.session_state.setdefault('custom_translation_rules', {})[str(active_gene).upper()] = {
+                            'markers': {marker: {'genotype_dosage': dosage} for marker, dosage in dosage_maps.items()},
+                            'diplotype_rules': diplotype_rules,
+                            'phenotype_map': phenotype_map,
+                            'phenotype_order': list(dict.fromkeys(phenotype_map.values())),
+                        }
+                        save_active_session()
+                        st.rerun()
+
+        if not pgx.get('translation_configured'):
+            st.info("Diplotype and metabolizer classifications need a gene-specific, validated rule table. Marker and population statistics are available now; enter the interpretation rules above to calculate clinical categories.")
+        elif pgx.get('total_samples', 0) and pgx.get('valid_pharmacogenomic_samples', 0) == 0:
+            st.warning("No determinate diplotype calls were produced. Check that the selected markers match the rule set and that every required genotype call is mapped, or configure rules for this uploaded marker panel above.")
 
         st.markdown("<br>", unsafe_allow_html=True)
         view_choice = st.radio(
@@ -2167,17 +2084,25 @@ def render_unified_results(full_results: dict, qc_report: dict):
     with tab_geo:
         st.markdown(f"### 🌐 Geographic Population Groups Analysis ({active_gene})")
         reg = full_results.get('regional', {})
-        regions = ['South India', 'North India', 'East India', 'West India', 'Central India']
-        
-        cols = st.columns(5)
+        regions = sorted(r for r, item in reg.items() if item.get('sample_count', 0) > 0)
+        if not regions:
+            st.info("No geographic groups are available. Map a region or state column during upload to enable this analysis.")
+        phenotype_categories = list(dict.fromkeys(
+            phenotype
+            for group in reg.values()
+            for phenotype in ((group.get('pgx_summary') or group.get(f"{active_gene.lower()}_summary") or {}).get('phenotypes', {}))
+            if phenotype != 'Not configured'
+        ))
+        cols = st.columns(min(5, len(regions))) if regions else []
         for idx, r in enumerate(regions):
             r_data = reg.get(r, {})
             snps_r = r_data.get('snps', {})
             pgx_r = r_data.get('pgx_summary') or r_data.get(f"{active_gene.lower()}_summary") or r_data.get('cyp2c19_summary', {})
-            pm_val = pgx_r.get('phenotypes', {}).get('Poor Metabolizer', pgx_r.get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
+            phenotype_values = pgx_r.get('phenotypes', {})
+            leading_phenotype = max(phenotype_values.items(), key=lambda item: item[1].get('count', 0)) if phenotype_values else (None, {})
 
             card_lines = []
-            for m in active_markers[:3]:
+            for m in active_markers:
                 m_conf = active_snp_conf.get(m, {})
                 var_al = m_conf.get('var_allele')
                 al_freqs = snps_r.get(m, {}).get('allele_freqs', {})
@@ -2186,22 +2111,19 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     non_refs = [a for a in al_freqs.keys() if a != ref_al]
                     var_al = non_refs[0] if non_refs else (list(al_freqs.keys())[0] if al_freqs else 'Var')
                 maf_val = snps_r.get(m, {}).get('allele_freqs', {}).get(var_al, snps_r.get(m, {}).get('maf', 0))
-                m_lbl = m.replace('CYP2C19', '').replace('CYP2C9', '').strip()
-                if not m_lbl:
-                    m_lbl = m
-                card_lines.append(f"{m_lbl} MAF ({var_al}): <strong>{maf_val}</strong>")
+                card_lines.append(f"{m} frequency ({var_al}): <strong>{maf_val}</strong>")
 
             lines_html = "<br>".join(card_lines)
             if lines_html:
                 lines_html += "<br>"
 
-            with cols[idx]:
+            with cols[idx % len(cols)]:
                 st.markdown(f"""
                 <div class="kpi-card">
                     <div class="kpi-lbl">{r}</div>
                     <div class="kpi-val">{r_data.get('sample_count', 0):,}</div>
                     <div style="font-size: 0.78rem; color: #475569; margin-top: 0.3rem; line-height: 1.4;">
-                        {lines_html}PM: <strong style="color: #EF4444;">{pm_val:.1f}%</strong>
+                        {lines_html}{f"Top phenotype: {leading_phenotype[0]} ({leading_phenotype[1].get('percentage', 0):.1f}%)" if leading_phenotype[0] else "Phenotype translation not configured"}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -2245,26 +2167,17 @@ def render_unified_results(full_results: dict, qc_report: dict):
             for r in regions:
                 r_data = reg.get(r, {})
                 p_dict = (r_data.get('pgx_summary') or r_data.get(f"{active_gene.lower()}_summary") or r_data.get('cyp2c19_summary', {})).get('phenotypes', {})
-                pm_val = p_dict.get('Poor Metabolizer', p_dict.get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
-                im_val = p_dict.get('Intermediate Metabolizer', p_dict.get('Intermediate Metabolizer (IM)', {})).get('percentage', 0.0)
-                try:
-                    pm_pct = float(pm_val)
-                except (ValueError, TypeError):
-                    pm_pct = 0.0
-                try:
-                    im_pct = float(im_val)
-                except (ValueError, TypeError):
-                    im_pct = 0.0
-                geo_pheno_data.append({'Geographic Group': r, 'Phenotype': 'Poor Metabolizer (PM %)', 'Percentage': pm_pct})
-                geo_pheno_data.append({'Geographic Group': r, 'Phenotype': 'Intermediate Metabolizer (IM %)', 'Percentage': im_pct})
+                for phenotype in phenotype_categories:
+                    metric = p_dict.get(phenotype, {})
+                    geo_pheno_data.append({'Geographic Group': r, 'Phenotype': phenotype, 'Percentage': float(metric.get('percentage', 0.0))})
             geo_pm_df = pd.DataFrame(geo_pheno_data, columns=['Geographic Group', 'Phenotype', 'Percentage'])
             if not geo_pm_df.empty:
                 fig_geo_pm = px.bar(
                     geo_pm_df,
                     x='Geographic Group', y='Percentage',
                     color='Phenotype', barmode='group',
-                    title=f"Clinical Phenotypes (PM & IM %) Across Geographic Groups ({active_gene})",
-                    color_discrete_map={'Poor Metabolizer (PM %)': '#DC2626', 'Intermediate Metabolizer (IM %)': '#D97706'}
+                    title=f"Phenotype Distribution Across Geographic Groups ({active_gene})",
+                    color_discrete_sequence=px.colors.qualitative.Safe
                 )
                 fig_geo_pm.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_geo_pm, use_container_width=True)
@@ -2295,19 +2208,31 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 else:
                     het_g = f"{ref_al}{var_al}"
 
-            rows_cfg = [
-                (f'{var_al} Count (Variant Allele)', lambda s: s.get(snp_key, {}).get('allele_counts', {}).get(var_al, 0)),
-                (f'{ref_al} Count (Reference Allele)', lambda s: s.get(snp_key, {}).get('allele_counts', {}).get(ref_al, 0)),
-                ('Total Allele Count (2N)', lambda s: sum(s.get(snp_key, {}).get('allele_counts', {}).values())),
-                (f'{het_g} COUNT (Heterozygote)', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(het_g, 0) if het_g else 0),
-                (f'{var_g} COUNT (Homozygous Variant)', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(var_g, 0) if var_g else 0),
-                (f'{wt_g} COUNT (Homozygous Wildtype)', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(wt_g, 0)),
-                ('Total Sample N', lambda s: sum(s.get(snp_key, {}).get('genotype_counts', {}).values())),
-                (f'Allele Frequency F({var_al})', lambda s: s.get(snp_key, {}).get('allele_freqs', {}).get(var_al, 0)),
-                (f'Allele Frequency F({ref_al})', lambda s: s.get(snp_key, {}).get('allele_freqs', {}).get(ref_al, 0)),
-                ('Chi-Square (χ²)', lambda s: s.get(snp_key, {}).get('hwe', {}).get('chi2_stat', 0)),
-                ('P VALUE', lambda s: s.get(snp_key, {}).get('hwe', {}).get('p_value', 1.0))
-            ]
+            if ref_al == var_al:
+                mono_genotype = f"{ref_al}{ref_al}"
+                rows_cfg = [
+                    (f'{ref_al} Count (Single Observed Allele)', lambda s: s.get(snp_key, {}).get('allele_counts', {}).get(ref_al, 0)),
+                    ('Total Allele Count (2N)', lambda s: sum(s.get(snp_key, {}).get('allele_counts', {}).values())),
+                    (f'{mono_genotype} Count', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(mono_genotype, 0)),
+                    ('Total Sample N', lambda s: sum(s.get(snp_key, {}).get('genotype_counts', {}).values())),
+                    (f'Allele Frequency F({ref_al})', lambda s: s.get(snp_key, {}).get('allele_freqs', {}).get(ref_al, 0)),
+                    ('Chi-Square (HWE not informative)', lambda s: s.get(snp_key, {}).get('hwe', {}).get('chi2_stat', 0)),
+                    ('P VALUE (HWE not informative)', lambda s: s.get(snp_key, {}).get('hwe', {}).get('p_value', 1.0))
+                ]
+            else:
+                rows_cfg = [
+                    (f'{var_al} Count (Variant Allele)', lambda s: s.get(snp_key, {}).get('allele_counts', {}).get(var_al, 0)),
+                    (f'{ref_al} Count (Reference Allele)', lambda s: s.get(snp_key, {}).get('allele_counts', {}).get(ref_al, 0)),
+                    ('Total Allele Count (2N)', lambda s: sum(s.get(snp_key, {}).get('allele_counts', {}).values())),
+                    (f'{het_g} COUNT (Heterozygote)', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(het_g, 0) if het_g else 0),
+                    (f'{var_g} COUNT (Homozygous Variant)', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(var_g, 0) if var_g else 0),
+                    (f'{wt_g} COUNT (Homozygous Wildtype)', lambda s: s.get(snp_key, {}).get('genotype_counts', {}).get(wt_g, 0)),
+                    ('Total Sample N', lambda s: sum(s.get(snp_key, {}).get('genotype_counts', {}).values())),
+                    (f'Allele Frequency F({var_al})', lambda s: s.get(snp_key, {}).get('allele_freqs', {}).get(var_al, 0)),
+                    (f'Allele Frequency F({ref_al})', lambda s: s.get(snp_key, {}).get('allele_freqs', {}).get(ref_al, 0)),
+                    ('Chi-Square (χ²)', lambda s: s.get(snp_key, {}).get('hwe', {}).get('chi2_stat', 0)),
+                    ('P VALUE', lambda s: s.get(snp_key, {}).get('hwe', {}).get('p_value', 1.0))
+                ]
             
             m_matrix = []
             for lbl, fn in rows_cfg:
@@ -2333,9 +2258,9 @@ def render_unified_results(full_results: dict, qc_report: dict):
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(f"#### 🌐 Geographic Region Metabolizer Phenotype Distribution Matrix ({active_gene})")
-        st.caption(f"Distribution of CPIC {active_gene} Metabolizer Phenotypes across Indian Geographic Population Groups.")
+        st.caption(f"Observed {active_gene} phenotype categories across the geographic groups present in this dataset.")
 
-        pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
+        pheno_order = phenotype_categories
         geo_pheno_matrix = []
         for r_name in regions:
             r_data = reg.get(r_name, {})
@@ -2359,34 +2284,50 @@ def render_unified_results(full_results: dict, qc_report: dict):
 
         st.dataframe(pd.DataFrame(geo_pheno_matrix), use_container_width=True, hide_index=True)
 
+        st.markdown(f"#### Diplotype Distribution by Geographic Group ({active_gene})")
+        geo_diplotype_categories = list(dict.fromkeys(
+            name
+            for group in reg.values()
+            for name in ((group.get('pgx_summary') or group.get(f"{active_gene.lower()}_summary") or {}).get('diplotypes', {}))
+            if name != 'Not configured'
+        ))
+        geo_diplotype_matrix = []
+        for r_name in regions:
+            r_data = reg.get(r_name, {})
+            dip_data = (r_data.get('pgx_summary') or r_data.get(f"{active_gene.lower()}_summary") or {}).get('diplotypes', {})
+            row = {'Geographic Group': r_name, 'Total Sample N': r_data.get('sample_count', 0)}
+            for category in geo_diplotype_categories:
+                metric = dip_data.get(category, {})
+                row[category] = f"{metric.get('count', 0)} ({metric.get('percentage', 0.0):.1f}%)"
+            geo_diplotype_matrix.append(row)
+        st.dataframe(pd.DataFrame(geo_diplotype_matrix), use_container_width=True, hide_index=True)
+
     # -------------------------------------------------------------------------
     # TAB 8: GENDER-WISE ANALYSIS
     # -------------------------------------------------------------------------
     with tab_gender:
         st.markdown(f"### 👫 Gender-Wise Population Pharmacogenomics Analysis ({active_gene})")
         gender_data = full_results.get('gender', {})
-        male = gender_data.get('Male', {})
-        female = gender_data.get('Female', {})
-        
-        m_count = male.get('sample_count', 0)
-        f_count = female.get('sample_count', 0)
         tot_count = ov.get('sample_count', 0)
-        
-        gk1, gk2, gk3 = st.columns(3)
-        gk1.metric("Male Samples (N)", f"{m_count:,}")
-        gk2.metric("Female Samples (N)", f"{f_count:,}")
-        gk3.metric("Total Cohort N", f"{tot_count:,}")
-        
-        m_phenos = (male.get('pgx_summary') or male.get(f"{active_gene.lower()}_summary") or male.get('cyp2c19_summary', {})).get('phenotypes', {})
-        f_phenos = (female.get('pgx_summary') or female.get(f"{active_gene.lower()}_summary") or female.get('cyp2c19_summary', {})).get('phenotypes', {})
-        
-        pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
+        gender_summary = pd.DataFrame([
+            {'Population Group': group, 'Sample Count': group_data.get('sample_count', 0), 'Cohort Percentage': f"{group_data.get('sample_count', 0) / tot_count * 100:.1f}%" if tot_count else '0.0%'}
+            for group, group_data in gender_data.items()
+        ])
+        st.dataframe(gender_summary, use_container_width=True, hide_index=True)
+
+        pheno_order = list(dict.fromkeys(
+            phenotype
+            for group_data in gender_data.values()
+            for phenotype in ((group_data.get('pgx_summary') or group_data.get(f"{active_gene.lower()}_summary") or {}).get('phenotypes', {}))
+            if phenotype != 'Not configured'
+        ))
         pheno_chart_df = []
-        for p_name in pheno_order:
-            if p_name in m_phenos and m_phenos[p_name].get('count', 0) > 0:
-                pheno_chart_df.append({'Gender': 'Male', 'Phenotype': p_name.split(' (')[0], 'Count': m_phenos[p_name]['count']})
-            if p_name in f_phenos and f_phenos[p_name].get('count', 0) > 0:
-                pheno_chart_df.append({'Gender': 'Female', 'Phenotype': p_name.split(' (')[0], 'Count': f_phenos[p_name]['count']})
+        for gender_name, group_data in gender_data.items():
+            group_phenotypes = (group_data.get('pgx_summary') or group_data.get(f"{active_gene.lower()}_summary") or {}).get('phenotypes', {})
+            for p_name in pheno_order:
+                metric = group_phenotypes.get(p_name, {})
+                if metric.get('count', 0) > 0:
+                    pheno_chart_df.append({'Population Group': gender_name, 'Phenotype': p_name.split(' (')[0], 'Count': metric['count']})
                 
         st.markdown("<br>", unsafe_allow_html=True)
         cg1, cg2 = st.columns(2)
@@ -2395,9 +2336,9 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 fig_g2 = px.bar(
                     pd.DataFrame(pheno_chart_df), 
                     x='Phenotype', y='Count', 
-                    color='Gender', barmode='group', 
-                    title=f"Metabolizer Phenotypes Comparison ({active_gene} Male vs Female)",
-                    color_discrete_sequence=['#2563EB', '#EC4899']
+                    color='Population Group', barmode='group',
+                    title=f"Phenotype Comparison by Population Group ({active_gene})",
+                    color_discrete_sequence=px.colors.qualitative.Safe
                 )
                 fig_g2.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_g2, use_container_width=True)
@@ -2406,20 +2347,17 @@ def render_unified_results(full_results: dict, qc_report: dict):
 
         with cg2:
             sel_gender_marker = st.selectbox("Select Biomarker to Compare:", active_markers, key="gender_biomarker_sel") if len(active_markers) > 1 else (active_markers[0] if active_markers else 'Biomarker')
-            m_snps = male.get('snps', {}).get(sel_gender_marker, {}).get('genotype_counts', {})
-            f_snps = female.get('snps', {}).get(sel_gender_marker, {}).get('genotype_counts', {})
-            all_observed_gts = sorted(list(set(list(m_snps.keys()) + list(f_snps.keys()))))
             gen_gt_df = []
-            for gt in all_observed_gts:
-                if gt in m_snps:
-                    gen_gt_df.append({'Gender': 'Male', 'Genotype': gt, 'Count': m_snps[gt]})
-                if gt in f_snps:
-                    gen_gt_df.append({'Gender': 'Female', 'Genotype': gt, 'Count': f_snps[gt]})
+            for gender_name, group_data in gender_data.items():
+                group_genotypes = group_data.get('snps', {}).get(sel_gender_marker, {}).get('genotype_counts', {})
+                for genotype, count in group_genotypes.items():
+                    if count:
+                        gen_gt_df.append({'Population Group': gender_name, 'Genotype': genotype, 'Count': count})
             if gen_gt_df:
                 fig_gen_gt = px.bar(
-                    pd.DataFrame(gen_gt_df), x='Genotype', y='Count', color='Gender', barmode='group',
-                    title=f"{sel_gender_marker} Genotypes Comparison (Male vs Female)",
-                    color_discrete_sequence=['#2563EB', '#EC4899']
+                    pd.DataFrame(gen_gt_df), x='Genotype', y='Count', color='Population Group', barmode='group',
+                    title=f"{sel_gender_marker} Genotypes by Population Group",
+                    color_discrete_sequence=px.colors.qualitative.Safe
                 )
                 fig_gen_gt.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_gen_gt, use_container_width=True)
@@ -2438,7 +2376,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
             selected_st = st.selectbox("Select Dedicated State Profile:", state_names, index=0, key="st_tab_selectbox")
             st_data = state_dict[selected_st]
             
-            primary_marker = active_markers[0] if active_markers else 'Biomarker'
+            primary_marker = st.selectbox("Select marker for this state profile:", active_markers, key="state_profile_marker") if active_markers else 'Biomarker'
             m_conf = active_snp_conf.get(primary_marker, {})
             var_al = m_conf.get('var_allele')
             al_freqs = st_data.get('snps', {}).get(primary_marker, {}).get('allele_freqs', {})
@@ -2449,15 +2387,17 @@ def render_unified_results(full_results: dict, qc_report: dict):
             marker_freq = al_freqs.get(var_al, st_data.get('snps', {}).get(primary_marker, {}).get('maf', 0))
 
             pgx_st = st_data.get('pgx_summary') or st_data.get(f"{active_gene.lower()}_summary") or st_data.get('cyp2c19_summary', {})
-            pm_pct = pgx_st.get('phenotypes', {}).get('Poor Metabolizer', pgx_st.get('phenotypes', {}).get('Poor Metabolizer (PM)', {})).get('percentage', 0.0)
+            state_phenotypes = {k: v for k, v in pgx_st.get('phenotypes', {}).items() if k != 'Not configured'}
+            top_state_phenotype = max(state_phenotypes.items(), key=lambda item: item[1].get('count', 0)) if state_phenotypes else (None, {})
 
             sk1, sk2, sk3, sk4 = st.columns(4)
             sk1.metric("State Cohort Size (N)", f"{st_data.get('sample_count', 0):,} samples", help=f"Total number of patients/samples from {selected_st} present in this cohort")
             sk2.metric("Missing Data Rate", f"{st_data.get('missing_pct', 0):.1f}%", help=f"Percentage of uncalled / missing genotypes in {selected_st}")
-            sk3.metric(f"{primary_marker} Var Freq ({var_al})", f"{marker_freq:.4f}" if isinstance(marker_freq, (int, float)) else str(marker_freq), help=f"Minor Allele Frequency (MAF) of variant allele {var_al} in {selected_st}")
-            sk4.metric("Poor Metabolizers %", f"{pm_pct:.1f}%", help=f"Percentage of Poor Metabolizer (PM) patients in {selected_st}")
+            allele_metric_label = f"{primary_marker} Single Allele Frequency ({var_al})" if var_al == m_conf.get('ref_allele') else f"{primary_marker} Variant Allele Frequency ({var_al})"
+            sk3.metric(allele_metric_label, f"{marker_freq:.4f}" if isinstance(marker_freq, (int, float)) else str(marker_freq), help=f"Frequency of configured allele {var_al} in {selected_st}")
+            sk4.metric("Most Frequent Phenotype", f"{top_state_phenotype[0]} ({top_state_phenotype[1].get('percentage', 0):.1f}%)" if top_state_phenotype[0] else "Rules needed")
 
-            st_phenos = pgx_st.get('phenotypes', {})
+            st_phenos = {k: v for k, v in pgx_st.get('phenotypes', {}).items() if k != 'Not configured'}
             st_snps = st_data.get('snps', {}).get(primary_marker, {}).get('genotype_counts', {})
             
             cs1, cs2 = st.columns(2)
@@ -2488,11 +2428,34 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 else:
                     st.info(f"No {active_gene} phenotype calls for {selected_st}.")
 
+            state_marker_rows = []
+            for marker in active_markers:
+                marker_stats = st_data.get('snps', {}).get(marker, {})
+                hwe_stats = marker_stats.get('hwe', {})
+                state_marker_rows.append({
+                    'Marker': marker,
+                    'Valid N': marker_stats.get('valid_samples', 0),
+                    'Genotype Counts': ', '.join(f"{gt}: {count}" for gt, count in marker_stats.get('genotype_counts', {}).items()),
+                    'Allele Counts': ', '.join(f"{allele}: {count}" for allele, count in marker_stats.get('allele_counts', {}).items()),
+                    'HWE χ²': hwe_stats.get('chi2_stat', 0.0),
+                    'HWE df': hwe_stats.get('df', 1),
+                    'Asymptotic p-value': hwe_stats.get('p_value', 1.0),
+                    'Decision p-value': hwe_stats.get('decision_p_value', hwe_stats.get('p_value', 1.0)),
+                    'HWE status': hwe_stats.get('interpretation', 'Not available'),
+                })
+            st.markdown(f"#### Marker Statistics for {selected_st} (All Selected Markers)")
+            st.dataframe(pd.DataFrame(state_marker_rows), use_container_width=True, hide_index=True)
+
             st.markdown("<br>", unsafe_allow_html=True)
             st.markdown(f"#### 💊 State-Wise Metabolizer Phenotype Distribution Matrix ({active_gene})")
-            st.caption(f"Distribution of CPIC {active_gene} Metabolizer Phenotypes across individual states in your cohort.")
+            st.caption(f"Observed {active_gene} phenotype categories across the states present in this dataset.")
 
-            pheno_order = CYP2C9_PHENOTYPE_ORDER if 'CYP2C9' in str(active_gene).upper() else PHENOTYPE_ORDER
+            pheno_order = list(dict.fromkeys(
+                name
+                for group in state_dict.values()
+                for name in ((group.get('pgx_summary') or group.get(f"{active_gene.lower()}_summary") or {}).get('phenotypes', {}))
+                if name != 'Not configured'
+            ))
             st_dict = full_results.get('state_wise', {})
             state_pheno_matrix = []
             for s_name, s_data in sorted(st_dict.items(), key=lambda x: x[1].get('sample_count', 0), reverse=True):
@@ -2516,6 +2479,23 @@ def render_unified_results(full_results: dict, qc_report: dict):
             state_pheno_matrix.append(tot_row)
 
             st.dataframe(pd.DataFrame(state_pheno_matrix), use_container_width=True, hide_index=True)
+
+            st.markdown(f"#### Diplotype Distribution by State ({active_gene})")
+            state_diplotype_categories = list(dict.fromkeys(
+                name
+                for group in state_dict.values()
+                for name in ((group.get('pgx_summary') or group.get(f"{active_gene.lower()}_summary") or {}).get('diplotypes', {}))
+                if name != 'Not configured'
+            ))
+            state_diplotype_matrix = []
+            for s_name, s_data in sorted(state_dict.items(), key=lambda item: item[1].get('sample_count', 0), reverse=True):
+                dip_data = (s_data.get('pgx_summary') or s_data.get(f"{active_gene.lower()}_summary") or {}).get('diplotypes', {})
+                row = {'State': s_name, 'Total Sample N': s_data.get('sample_count', 0)}
+                for category in state_diplotype_categories:
+                    metric = dip_data.get(category, {})
+                    row[category] = f"{metric.get('count', 0)} ({metric.get('percentage', 0.0):.1f}%)"
+                state_diplotype_matrix.append(row)
+            st.dataframe(pd.DataFrame(state_diplotype_matrix), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
 # 3-STEP WORKFLOW PIPELINE RENDERER (EXACT MATCH FOR USER SCREENSHOTS 1, 2, 3, 4, 5)
@@ -2552,23 +2532,23 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem;">
                 <div style="background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.2rem; border-left: 4px solid #34D399; backdrop-filter: blur(8px);">
                     <div style="font-size: 0.78rem; text-transform: uppercase; color: #A7F3D0; font-weight: 800; letter-spacing: 0.06em;">Target Gene & SNPs</div>
-                    <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">CYP2C19 (*2, *3, *17)</div>
-                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">rs4244285, rs4986893, rs12248560</div>
+                    <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">Selected gene and markers</div>
+                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Configured from each uploaded dataset</div>
                 </div>
                 <div style="background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.2rem; border-left: 4px solid #60A5FA; backdrop-filter: blur(8px);">
                     <div style="font-size: 0.78rem; text-transform: uppercase; color: #93C5FD; font-weight: 800; letter-spacing: 0.06em;">Statistical & HWE Engine</div>
                     <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">Chi-Square (χ²) & Haldane</div>
-                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Threshold χ² ≥ 3.841 (p ≤ 0.05)</div>
+                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Test and interpretation shown per marker</div>
                 </div>
                 <div style="background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.2rem; border-left: 4px solid #FBBF24; backdrop-filter: blur(8px);">
                     <div style="font-size: 0.78rem; text-transform: uppercase; color: #FDE68A; font-weight: 800; letter-spacing: 0.06em;">Demographic Matrix</div>
-                    <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">5 Regional Macro-Zones</div>
-                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">South, North, East, West, Central</div>
+                    <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">Uploaded population groups</div>
+                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Region and locality values from your data</div>
                 </div>
                 <div style="background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.2rem; border-left: 4px solid #F472B6; backdrop-filter: blur(8px);">
                     <div style="font-size: 0.78rem; text-transform: uppercase; color: #F472B6; font-weight: 800; letter-spacing: 0.06em;">CPIC Clinical Calling</div>
-                    <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">5 Metabolizer Classes</div>
-                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">UM, RM, NM, IM, PM Phenotypes</div>
+                    <div style="font-size: 1.15rem; color: #FFFFFF; font-weight: 700; margin-top: 0.3rem;">Configured phenotype classes</div>
+                    <div style="font-size: 0.82rem; color: #CBD5E1; margin-top: 0.2rem;">Based on supplied interpretation rules</div>
                 </div>
             </div>
         </div>
@@ -2600,10 +2580,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             <div style="background: #FFFFFF; border-radius: 12px; padding: 1.4rem; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border-top: 4px solid #7C3AED;">
                 <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.6rem;">
                     <span style="font-size: 1.6rem; background: #F3E8FF; padding: 0.4rem; border-radius: 8px;">🧬</span>
-                    <h4 style="margin:0; color:#1E293B; font-weight:700; font-size:1.1rem;">Target CYP2C19 SNP Panel Genotyping</h4>
+                    <h4 style="margin:0; color:#1E293B; font-weight:700; font-size:1.1rem;">Gene-Agnostic Marker Analysis</h4>
                 </div>
                 <p style="color:#64748B; font-size:0.92rem; line-height:1.5; margin:0;">
-                    Evaluates key pharmacogenetic star-allele variants: <code>CYP2C19*2</code> (rs4244285), <code>CYP2C19*3</code> (rs4986893), and <code>CYP2C19*17</code> (rs12248560).
+                    Analyzes the gene and marker columns selected from your upload, using the allele labels and marker rules you provide.
                 </p>
             </div>
             <div style="background: #FFFFFF; border-radius: 12px; padding: 1.4rem; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border-top: 4px solid #DC2626;">
@@ -2612,7 +2592,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     <h4 style="margin:0; color:#1E293B; font-weight:700; font-size:1.1rem;">Hardy–Weinberg Equilibrium Red Warning Alerts</h4>
                 </div>
                 <p style="color:#64748B; font-size:0.92rem; line-height:1.5; margin:0;">
-                    Calculates observed vs expected genotype counts and automatically highlights statistically significant HWE deviations (<code>χ² ≥ 3.841</code>) in bright red.
+                    Calculates observed and expected genotype counts, chi-square statistics, degrees of freedom, and p-values; it marks departures using the reported test result.
                 </p>
             </div>
             <div style="background: #FFFFFF; border-radius: 12px; padding: 1.4rem; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border-top: 4px solid #D97706;">
@@ -2621,7 +2601,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     <h4 style="margin:0; color:#1E293B; font-weight:700; font-size:1.1rem;">Demographic & Regional Stratification</h4>
                 </div>
                 <p style="color:#64748B; font-size:0.92rem; line-height:1.5; margin:0;">
-                    Groups state sample locations into 5 Indian macro-zones (South, North, East, West, Central) to generate regional allele distribution matrices.
+                    Uses the geographic-group and state/locality columns mapped from your upload to calculate cohort-specific population matrices.
                 </p>
             </div>
             <div style="background: #FFFFFF; border-radius: 12px; padding: 1.4rem; border: 1px solid #E2E8F0; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border-top: 4px solid #0284C7;">
@@ -2630,7 +2610,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     <h4 style="margin:0; color:#1E293B; font-weight:700; font-size:1.1rem;">CPIC Metabolizer Phenotype Translation</h4>
                 </div>
                 <p style="color:#64748B; font-size:0.92rem; line-height:1.5; margin:0;">
-                    Translates star-allele diplotypes into 5 standardized clinical phenotype classes: Ultrarapid (UM), Rapid (RM), Normal (NM), Intermediate (IM), and Poor (PM).
+                    Applies curated gene rules or your explicit validated dosage-to-diplotype and phenotype mapping. Unsupported patterns remain indeterminate.
                 </p>
             </div>
         </div>
@@ -2690,7 +2670,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         save_active_session()
                         st.rerun()
 
-            catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
+            catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else []
             custom_genes = st.session_state.get('custom_genes', [])
             gene_list = sorted(list(set(catalog_genes + custom_genes)))
             gene_options = ["(Select Target Gene)"] + gene_list
@@ -3007,10 +2987,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             if st.session_state.get('upload_error'):
                 st.error(st.session_state['upload_error'])
 
-            # Required Metadata Verification (Sample ID, Gender, State)
+            # Required identifiers plus optional demographic group columns.
             st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
-            st.markdown("#### 📋 Required Metadata Fields (Compulsory)")
-            st.caption("These 3 fields are required for patient tracking and demographic stratification.")
+            st.markdown("#### 📋 Sample and Population Group Mapping")
+            st.caption("Sample ID is required. Gender, state, and an optional geographic/population-group column enable their respective stratified views.")
 
             cur_insp = st.session_state.get('upload_inspection')
             if not cur_insp and df_raw is not None and not df_raw.empty:
@@ -3019,19 +2999,31 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
             raw_cols = list(df_raw.columns) if df_raw is not None and not df_raw.empty else []
             demo_map = st.session_state.get('demographic_mapping', {})
+            region_tokens = ('region', 'geographic group', 'population group', 'ancestry', 'ethnicity', 'continent', 'country')
+            reserved_demo_cols = {
+                demo_map.get('Sample_ID') or (cur_insp.get('sample_id_col') if cur_insp else None),
+                demo_map.get('Gender') or (cur_insp.get('gender_col') if cur_insp else None),
+                demo_map.get('State') or (cur_insp.get('state_col') if cur_insp else None),
+            }
+            region_guess = next((col for col in raw_cols if col not in reserved_demo_cols and any(token in str(col).lower() for token in region_tokens)), None)
             if not demo_map and cur_insp:
                 demo_map = {
                     'Sample_ID': cur_insp.get('sample_id_col'),
                     'Gender': cur_insp.get('gender_col'),
-                    'State': cur_insp.get('state_col')
+                    'State': cur_insp.get('state_col'),
+                    'Region': region_guess
                 }
                 st.session_state['demographic_mapping'] = demo_map
 
-            sid_mapped = demo_map.get('Sample_ID') or (cur_insp['sample_id_col'] if cur_insp else None)
-            gen_mapped = demo_map.get('Gender') or (cur_insp['gender_col'] if cur_insp else None)
-            state_mapped = demo_map.get('State') or (cur_insp['state_col'] if cur_insp else None)
+            sid_mapped = demo_map.get('Sample_ID') if 'Sample_ID' in demo_map else (cur_insp['sample_id_col'] if cur_insp else None)
+            gen_mapped = demo_map.get('Gender') if 'Gender' in demo_map else (cur_insp['gender_col'] if cur_insp else None)
+            state_mapped = demo_map.get('State') if 'State' in demo_map else (cur_insp['state_col'] if cur_insp else None)
+            region_mapped = demo_map.get('Region') if 'Region' in demo_map else region_guess
+            if region_mapped and 'Region' not in demo_map:
+                demo_map['Region'] = region_mapped
+                st.session_state['demographic_mapping'] = demo_map
 
-            c_aud1, c_aud2, c_aud3 = st.columns(3)
+            c_aud1, c_aud2, c_aud3, c_aud4 = st.columns(4)
             with c_aud1:
                 if sid_mapped and sid_mapped in raw_cols:
                     st.success(f"✅ **Sample ID (Required):** `{sid_mapped}`")
@@ -3044,13 +3036,18 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     st.warning("⚠️ **Gender (Required):** Not detected in columns")
             with c_aud3:
                 if state_mapped and state_mapped in raw_cols:
-                    st.success(f"✅ **State / Region (Required):** `{state_mapped}`")
+                    st.success(f"✅ **State:** `{state_mapped}`")
                 else:
-                    st.warning("⚠️ **State (Required):** Not detected in columns")
+                    st.info("State column not mapped")
+            with c_aud4:
+                if region_mapped and region_mapped in raw_cols:
+                    st.success(f"✅ **Geographic Group:** `{region_mapped}`")
+                else:
+                    st.info("Optional geographic group not mapped")
 
             if raw_cols:
                 with st.expander("🔧 Confirm / Adjust Required Metadata Columns", expanded=False):
-                    c_adj1, c_adj2, c_adj3 = st.columns(3)
+                    c_adj1, c_adj2, c_adj3, c_adj4 = st.columns(4)
                     sid_opt = raw_cols
                     gen_opt = ["(None)"] + raw_cols
                     state_opt = ["(None)"] + raw_cols
@@ -3061,12 +3058,16 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                     chosen_sid = c_adj1.selectbox("Sample ID Column *", sid_opt, index=idx_sid, key="u_map_sid")
                     chosen_gen = c_adj2.selectbox("Gender Column *", gen_opt, index=idx_gen, key="u_map_gen")
-                    chosen_state = c_adj3.selectbox("State / Region Column *", state_opt, index=idx_state, key="u_map_state")
+                    chosen_state = c_adj3.selectbox("State / Locality Column", state_opt, index=idx_state, key="u_map_state")
+                    region_opt = ["(None)"] + [col for col in raw_cols if col not in {chosen_sid, chosen_gen, chosen_state}]
+                    idx_region = region_opt.index(region_mapped) if region_mapped in region_opt else 0
+                    chosen_region = c_adj4.selectbox("Geographic Group Column", region_opt, index=idx_region, key="u_map_region")
 
                     st.session_state['demographic_mapping'] = {
                         'Sample_ID': chosen_sid,
                         'Gender': chosen_gen if chosen_gen != "(None)" else None,
-                        'State': chosen_state if chosen_state != "(None)" else None
+                        'State': chosen_state if chosen_state != "(None)" else None,
+                        'Region': chosen_region if chosen_region != "(None)" else None
                     }
 
             # -------------------------------------------------------------------------
@@ -3298,7 +3299,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("#### ➕ Manual Sample Data Entry Form")
-                st.caption("Insert individual sample records.")
+                st.caption("Add a sample using the currently selected gene, markers, and mapped metadata columns.")
+                manual_markers = list(st.session_state.get('selected_markers', []))
+                manual_gene = st.session_state.get('selected_gene') or 'Selected target'
                 
                 with st.form("manual_sample_form_single", clear_on_submit=True):
                     f_c1, f_c2 = st.columns(2)
@@ -3306,37 +3309,45 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     in_gender = f_c2.selectbox("Gender *", ["Male", "Female", "Unknown"])
                     
                     f_c3, f_c4 = st.columns(2)
-                    in_dob = f_c3.text_input("Date of Birth (YYYY-MM-DD)", value="1990-01-01")
-                    in_state = f_c4.selectbox("State / Region *", list(STATE_TO_REGION.keys()))
+                    in_dob = f_c3.text_input("Date of Birth (optional)")
+                    in_state = f_c4.text_input("State or locality")
                     
-                    in_native = st.text_input("Native Place (City / District)", value=in_state)
-                    in_3gen = st.selectbox("Is their family lived at Native place for past 3 generations?", ["Yes", "No", "Unknown"])
+                    in_region = st.text_input("Geographic group (optional)")
+                    in_native = st.text_input("Native place (optional)")
                     
-                    st.markdown("##### CYP2C19 Target Genotypes")
-                    fg1, fg2, fg3 = st.columns(3)
-                    in_cyp2 = fg1.selectbox("CYP2C19*2 (rs4244285) *", ["GA", "AA", "GG", "Missing", "CC (Invalid Call)"])
-                    in_cyp3 = fg2.selectbox("CYP2C19*3 (rs4986893) *", ["GG", "Missing"])
-                    in_cyp17 = fg3.selectbox("CYP2C19*17 (rs12248560) *", ["CC", "CT", "TT", "Missing", "GG (Invalid Call)"])
+                    st.markdown(f"##### {manual_gene} marker calls")
+                    manual_genotypes = {}
+                    if manual_markers:
+                        for marker_start in range(0, len(manual_markers), 3):
+                            marker_chunk = manual_markers[marker_start:marker_start + 3]
+                            marker_columns = st.columns(len(marker_chunk))
+                            for marker_column, marker_name in zip(marker_columns, marker_chunk):
+                                manual_genotypes[marker_name] = marker_column.text_input(
+                                    marker_name,
+                                    placeholder="Enter observed genotype or leave blank",
+                                    key=f"manual_genotype_{re.sub(r'[^A-Za-z0-9]+', '_', marker_name)}",
+                                ).strip().upper()
+                    else:
+                        st.info("Select a gene and marker panel before entering sample genotypes.")
                     
-                    submit_sample = st.form_submit_button("➕ Add Sample & Recalculate Statistics", type="primary", use_container_width=True)
+                    can_add_manual_sample = bool(manual_markers and st.session_state.get('mapped_cols') and in_sid.strip())
+                    submit_sample = st.form_submit_button("➕ Add Sample & Recalculate Statistics", type="primary", use_container_width=True, disabled=not can_add_manual_sample)
                     
                     if submit_sample:
-                        cyp2_val = in_cyp2.split(' ')[0]
-                        cyp3_val = in_cyp3.split(' ')[0]
-                        cyp17_val = in_cyp17.split(' ')[0]
-
-                        new_row = {
-                            'sample ID': in_sid,
-                            'Gender': in_gender,
-                            'Date of Birth': in_dob,
-                            'Native place ': in_native,
-                            'State': in_state,
-                            'Test requested': 'CYP2C19 Genotyping',
-                            'Is their family lived at Native place for past 3 generations?': in_3gen,
-                            'CYP2C19*2 (rs4244285)': np.nan if "Missing" in in_cyp2 else cyp2_val,
-                            'CYP2C19*3 (rs4986893)': np.nan if "Missing" in in_cyp3 else cyp3_val,
-                            'CYP2C19*17 ( rs12248560)': np.nan if "Missing" in in_cyp17 else cyp17_val
-                        }
+                        demo_columns = st.session_state.get('demographic_mapping', {})
+                        new_row = {}
+                        new_row[demo_columns.get('Sample_ID') or 'Sample_ID'] = in_sid.strip()
+                        new_row[demo_columns.get('Gender') or 'Gender'] = in_gender
+                        new_row[demo_columns.get('State') or 'State'] = in_state.strip() or np.nan
+                        if in_region.strip():
+                            new_row[demo_columns.get('Region') or 'Region'] = in_region.strip()
+                        if in_dob.strip():
+                            new_row['Date of Birth'] = in_dob.strip()
+                        if in_native.strip():
+                            new_row['Native Place'] = in_native.strip()
+                        marker_column_by_name = {standard_name: raw_name for raw_name, standard_name in st.session_state.get('mapped_cols', {}).items()}
+                        for marker_name, genotype in manual_genotypes.items():
+                            new_row[marker_column_by_name.get(marker_name, marker_name)] = genotype or np.nan
                         
                         clear_deletion_flag()
                         if st.session_state['uploaded_df'] is not None and len(st.session_state['uploaded_df']) > 0:
@@ -3359,7 +3370,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             # -------------------------------------------------------------------------
             # 1. CASCADE DROPDOWNS: SELECT GENE FIRST, THEN SELECT MARKER(S)
             # -------------------------------------------------------------------------
-            catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
+            catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else []
             custom_genes = st.session_state.get('custom_genes', [])
             all_catalog_genes = sorted(list(set(catalog_genes + custom_genes)))
             gene_options = ["(Select Target Gene)"] + all_catalog_genes
@@ -4554,6 +4565,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             final_mapping[demo['Gender']] = 'Gender'
                         if demo.get('State') and demo['State'] in all_cols:
                             final_mapping[demo['State']] = 'State'
+                        if demo.get('Region') and demo['Region'] in all_cols and demo['Region'] not in {demo.get('Sample_ID'), demo.get('Gender'), demo.get('State')}:
+                            final_mapping[demo['Region']] = 'Region'
                         custom_rules_for_qc = {}
                         for m_col, m_info in mapped_marker_dict.items():
                             final_mapping[m_col] = m_info['std_name']
@@ -4638,7 +4651,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         # STEP 4: RESULTS (GENE & BIOMARKER INTERACTIVE VISUALIZATION STUDIO)
         # -------------------------------------------------------------------------
         elif st.session_state['workflow_step'] == '4 · Results':
-            active_gene = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
+            active_gene = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'Custom'
 
             # Render Full Analytical Platform dynamically for Any Target Gene
             render_unified_results(full_results, qc_report)
@@ -4788,10 +4801,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         key="btn_res_full_dl_csv"
                     )
 
-            target_gene_lbl = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
+            target_gene_lbl = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'Custom'
             st.markdown(f"""
             <div class="footer-disclaimer-text">
-                PGx Pop MVP · {target_gene_lbl} calling uses a standardized CPIC-aligned unphased-genotype heuristic — see notes in the {target_gene_lbl} tab · Not for clinical use without independent validation.
+                PGx Pop MVP · {target_gene_lbl} calling uses configured translation rules. Validate clinical interpretation independently before clinical use.
             </div>
             """, unsafe_allow_html=True)
 

@@ -41,16 +41,25 @@ class DemographicStratifier:
         # Clean non-breaking spaces and redundant whitespace
         state_raw = re.sub(r'[\s\u00a0]+', ' ', state_raw).strip()
         native_place_raw = re.sub(r'[\s\u00a0]+', ' ', native_place_raw).strip()
-        region_raw = str(row.get('Region', '')).strip() if 'Region' in row else ''
+        raw_region_value = row.get('Region', '')
+        region_raw = str(raw_region_value).strip() if pd.notna(raw_region_value) else ''
+        if region_raw.lower() in {'', 'nan', 'none', 'null', '<na>'}:
+            region_raw = ''
+        canonical_regions = {
+            'north india': 'North India', 'south india': 'South India',
+            'east india': 'East India', 'west india': 'West India',
+            'central india': 'Central India',
+        }
         
         # 0. Check direct Region column match
         if region_raw:
-            reg_clean = re.sub(r'[\s\u00a0]+', ' ', region_raw).title()
-            if 'Central' in reg_clean: return 'Central India'
-            if 'North' in reg_clean: return 'North India'
-            if 'South' in reg_clean: return 'South India'
-            if 'East' in reg_clean:  return 'East India'
-            if 'West' in reg_clean:  return 'West India'
+            normalized_region = re.sub(r'[\s\u00a0]+', ' ', region_raw).strip().lower()
+            if normalized_region in canonical_regions:
+                return canonical_regions[normalized_region]
+            # Keep user-provided geographic labels (for example, provinces,
+            # ancestry groups, or regions outside India) instead of discarding
+            # them into an India-specific catch-all.
+            return re.sub(r'[\s\u00a0]+', ' ', region_raw).strip()
 
         # 1. Direct match on State
         if state_raw in STATE_TO_REGION:
@@ -62,13 +71,10 @@ class DemographicStratifier:
             if k.lower() == state_raw.lower():
                 return v
 
-        # 3. Check for direct region string (e.g. "North India ", "South India ", "Central India ")
-        state_clean = re.sub(r'[\s\u00a0]+', ' ', state_raw).title()
-        if 'Central' in state_clean: return 'Central India'
-        if 'North' in state_clean: return 'North India'
-        if 'South' in state_clean: return 'South India'
-        if 'East' in state_clean:  return 'East India'
-        if 'West' in state_clean:  return 'West India'
+        # 3. Accept an explicit standard region label in the State field.
+        normalized_state = re.sub(r'[\s\u00a0]+', ' ', state_raw).strip().lower()
+        if normalized_state in canonical_regions:
+            return canonical_regions[normalized_state]
         
         # 4. Predict State from Native Place (City/District gazetteer)
         for city, mapped_state in CITY_TO_STATE.items():
@@ -83,7 +89,7 @@ class DemographicStratifier:
         return 'Unclassified / Other'
 
     @classmethod
-    def stratify_and_analyze(cls, df: pd.DataFrame, custom_snp_rules: Optional[Dict] = None, active_gene: Optional[str] = None) -> Dict[str, Any]:
+    def stratify_and_analyze(cls, df: pd.DataFrame, custom_snp_rules: Optional[Dict] = None, active_gene: Optional[str] = None, custom_translation_rules: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Selects marker rules and optional translation rules for the active gene,
         then computes marker statistics and demographic stratification.
@@ -115,7 +121,7 @@ class DemographicStratifier:
 
         # Use one generic engine; gene-specific translation behavior is supplied
         # through declarative rule data, while unknown genes remain unclassified.
-        translation_rules = GENE_TRANSLATION_RULES.get(str(active_gene).upper())
+        translation_rules = (custom_translation_rules or {}).get(str(active_gene).upper()) or GENE_TRANSLATION_RULES.get(str(active_gene).upper())
         # Identical configured alleles represent a monomorphic marker, not a
         # valid reference/variant distinction for clinical diplotype calling.
         # Keep population statistics, but avoid applying clinical rules that
@@ -126,7 +132,8 @@ class DemographicStratifier:
             and str(rule.get('ref_allele', '')).strip()
             for rule in (custom_snp_rules or {}).values()
         )
-        if has_monomorphic_marker:
+        has_user_translation = bool((custom_translation_rules or {}).get(str(active_gene).upper()))
+        if has_monomorphic_marker and not has_user_translation:
             translation_rules = None
         data_processed, overall_pgx_summary = RuleBasedPGxEngine.process_dataframe(data, translation_rules)
         
@@ -142,8 +149,13 @@ class DemographicStratifier:
         if 'Gender_Clean' not in data_processed.columns:
             g_col = next((c for c in ['Gender', 'gender', 'sex', 'Sex'] if c in data_processed.columns), None)
             if g_col:
-                gender_map = {'male': 'Male', 'm': 'Male', 'female': 'Female', 'f': 'Female'}
-                data_processed['Gender_Clean'] = data_processed[g_col].apply(lambda x: gender_map.get(str(x).strip().lower(), 'Unknown') if pd.notna(x) else 'Unknown')
+                gender_map = {'male': 'Male', 'm': 'Male', 'man': 'Male', 'female': 'Female', 'f': 'Female', 'woman': 'Female'}
+                def normalize_gender(value):
+                    if pd.isna(value) or not str(value).strip():
+                        return 'Unknown'
+                    raw = re.sub(r'[\s\u00a0]+', ' ', str(value)).strip()
+                    return gender_map.get(raw.lower(), raw.title())
+                data_processed['Gender_Clean'] = data_processed[g_col].apply(normalize_gender)
             else:
                 data_processed['Gender_Clean'] = 'Unknown'
 
@@ -225,15 +237,11 @@ class DemographicStratifier:
         results['overall'] = analyze_subgroup(data_processed, 'Overall Population')
         
         # 2. Regional Analysis (North, South, East, West, Central India)
-        standard_regions = ['North India', 'South India', 'East India', 'West India', 'Central India']
-        for region in standard_regions:
-            reg_df = data_processed[data_processed['Region'] == region]
+        observed_regions = data_processed['Region'].dropna().astype(str).str.strip()
+        region_names = sorted({name for name in observed_regions if name and name.lower() not in {'nan', 'none', 'null'}})
+        for region in region_names:
+            reg_df = data_processed[data_processed['Region'].astype(str).str.strip() == region]
             results['regional'][region] = analyze_subgroup(reg_df, region)
-            
-        # Catch any unclassified regions
-        unclass_df = data_processed[~data_processed['Region'].isin(standard_regions)]
-        if len(unclass_df) > 0:
-            results['regional']['Unclassified / Other'] = analyze_subgroup(unclass_df, 'Unclassified')
 
         # 3. State-Wise Analysis (Individual Indian States)
         unique_states = data_processed['State_Clean'].unique() if 'State_Clean' in data_processed.columns else []
@@ -244,8 +252,8 @@ class DemographicStratifier:
                 if len(st_df) > 0:
                     results['state_wise'][state_str] = analyze_subgroup(st_df, state_str)
 
-        # 4. Gender Analysis (Male, Female)
-        genders = ['Male', 'Female']
+        # 4. Gender / demographic-category analysis, based on values in the data.
+        genders = sorted(data_processed['Gender_Clean'].dropna().astype(str).unique()) if 'Gender_Clean' in data_processed.columns else []
         for gender in genders:
             gen_df = data_processed[data_processed['Gender_Clean'] == gender] if 'Gender_Clean' in data_processed.columns else pd.DataFrame()
             if not gen_df.empty:

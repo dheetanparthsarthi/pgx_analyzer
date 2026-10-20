@@ -123,6 +123,7 @@ class GeneticStatsEngine:
                         'chi2_stat': 0.0,
                         'df': 0,
                         'p_value': 1.0,
+                        'decision_p_value': 1.0,
                         'exact_p_value': 1.0,
                         'interpretation': 'Monomorphic; HWE not informative'
                     }
@@ -142,6 +143,7 @@ class GeneticStatsEngine:
                     'chi2_stat': 0.0,
                     'df': 0,
                     'p_value': 1.0,
+                    'decision_p_value': 1.0,
                     'exact_p_value': 1.0,
                     'interpretation': 'Monomorphic; HWE not informative'
                 }
@@ -174,6 +176,7 @@ class GeneticStatsEngine:
                     'chi2_stat': 0.0,
                     'df': 1,
                     'p_value': 1.0,
+                    'decision_p_value': 1.0,
                     'exact_p_value': 1.0,
                     'interpretation': 'No Data'
                 }
@@ -224,6 +227,7 @@ class GeneticStatsEngine:
                 'chi2_stat': round(chi2_stat, 4),
                 'df': 1,
                 'p_value': round(p_val, 4),
+                'decision_p_value': round(final_p, 4),
                 'exact_p_value': round(exact_p_val, 4),
                 'interpretation': interpretation
             }
