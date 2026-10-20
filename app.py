@@ -2730,9 +2730,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 best_sheet = sheet_names[0]
                                 max_density = -1
                                 for s in sheet_names:
-                                    s_df = pd.read_excel(excel_file, sheet_name=s)
-                                    gt_cols = [c for c in s_df.columns if any(k in str(c).lower() for k in ['*2', '*3', '*17', 'cyp', 'rs', 'snp', 'marker', 'gene'])]
-                                    score = int(s_df[gt_cols].notna().sum().sum()) if gt_cols else int(s_df.notna().sum().sum())
+                                    # Fast preview (first 50 rows) for sheet scoring rather than full parsing
+                                    s_df_prev = pd.read_excel(excel_file, sheet_name=s, nrows=50)
+                                    gt_cols = [c for c in s_df_prev.columns if any(k in str(c).lower() for k in ['*2', '*3', '*17', 'cyp', 'rs', 'snp', 'marker', 'gene'])]
+                                    score = int(s_df_prev[gt_cols].notna().sum().sum()) if gt_cols else int(s_df_prev.notna().sum().sum())
                                     if score > max_density:
                                         max_density = score
                                         best_sheet = s
@@ -2762,35 +2763,35 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 'State': chk_res['state_col']
                             }
 
-                            if has_active_data():
-                                st.session_state['pending_new_df'] = df_load
-                                st.session_state['pending_file_id'] = uploaded_file_id
-                                st.session_state['pending_file_name'] = file_upload.name
-                            else:
-                                clear_deletion_flag()
-                                st.session_state['last_uploaded_file_id'] = uploaded_file_id
-                                st.session_state['uploaded_df'] = df_load
-                                st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
-                                st.session_state['mapped_cols'] = {}
-                                save_active_dataset(df_load)
+                            clear_deletion_flag()
+                            st.session_state['last_uploaded_file_id'] = uploaded_file_id
+                            st.session_state['uploaded_df'] = df_load
+                            st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
+                            st.session_state['mapped_cols'] = {}
+                            st.session_state['pending_new_df'] = None
+                            st.session_state['pending_file_id'] = None
+                            st.session_state['pending_file_name'] = None
+                            save_active_dataset(df_load)
 
-                                # Auto-detect target gene ONLY if user has not explicitly selected one
-                                detected_file_genes = detect_genes_in_columns(df_load.columns)
-                                curr_g = st.session_state.get('selected_gene')
-                                if not curr_g and detected_file_genes:
-                                    primary_g = detected_file_genes[0]
-                                    all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
-                                    matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(df_load.columns))]
-                                    chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
-                                    set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
-                                elif curr_g:
-                                    all_g_markers = get_default_markers_for_gene(curr_g, catalog_df)
-                                    matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], curr_g, list(df_load.columns))]
-                                    if matched_f_markers:
-                                        st.session_state['selected_markers'] = matched_f_markers
+                            # Auto-detect target gene ONLY if user has not explicitly selected one
+                            detected_file_genes = detect_genes_in_columns(df_load.columns)
+                            curr_g = st.session_state.get('selected_gene')
+                            if not curr_g and detected_file_genes:
+                                primary_g = detected_file_genes[0]
+                                all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
+                                matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(df_load.columns))]
+                                chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
+                                set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
+                            elif curr_g:
+                                all_g_markers = get_default_markers_for_gene(curr_g, catalog_df)
+                                matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], curr_g, list(df_load.columns))]
+                                if matched_f_markers:
+                                    st.session_state['selected_markers'] = matched_f_markers
 
-                                st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns).")
-                                st.rerun()
+                            # Seamless, instant advance to Step 3 Map columns
+                            st.session_state['workflow_step'] = '3 · Map columns'
+                            st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns). Advancing to Map Columns...")
+                            st.rerun()
                     except Exception as e:
                         st.error(f"Error loading file: {e}")
 
@@ -3306,6 +3307,20 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     'unnamed', 'patient', 'name', 'age', 'center', 'hospital', 'clinic', 'india'
                 ]
 
+                # Cached extraction of column genotype calls to eliminate UI lag during reruns
+                _col_calls_cache = {}
+                def get_col_calls_cached(c_name: str):
+                    if not c_name or c_name == "(Select Column)" or c_name not in df_raw.columns:
+                        return pd.Series(dtype=str), {}, []
+                    if c_name not in _col_calls_cache:
+                        raw_s = df_raw[c_name].dropna().astype(str).str.strip().str.upper()
+                        valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
+                        norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
+                        obs_counts = dict(norm_calls.value_counts())
+                        det_calls = list(obs_counts.keys())
+                        _col_calls_cache[c_name] = (norm_calls, obs_counts, det_calls)
+                    return _col_calls_cache[c_name]
+
                 def is_demographic_or_metadata(col_name: str) -> bool:
                     clean = str(col_name).strip().lower()
                     if clean.startswith('unnamed:'):
@@ -3612,16 +3627,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         else:
                             st.session_state[col_tracker_key] = sel_col
 
-                        # Live Data Inspection for this column
-                        observed_counts = {}
-                        detected_calls_list = []
-                        norm_calls = pd.Series(dtype=str)
-                        if sel_col != "(Select Column)" and sel_col in df_raw.columns:
-                            raw_s = df_raw[sel_col].dropna().astype(str).str.strip().str.upper()
-                            valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
-                            norm_calls = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
-                            observed_counts = dict(norm_calls.value_counts())
-                            detected_calls_list = list(observed_counts.keys())
+                        # Live Data Inspection for this column (fast cached lookup)
+                        norm_calls, observed_counts, detected_calls_list = get_col_calls_cached(sel_col)
                         tot_samples_col = len(norm_calls)
 
                         # Determine defaults prioritizing detected calls in the data
@@ -4250,10 +4257,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         m_pm = str(r_val.get('Permitted Genotypes', '')).strip().upper()
 
                         if m_cl and m_cl != "(Select Column)" and m_cl in df_raw.columns:
-                            raw_s = df_raw[m_cl].dropna().astype(str).str.strip().str.upper()
-                            valid_s = raw_s[~raw_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
-                            norm_c = valid_s.map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
-                            c_cnts = dict(norm_c.value_counts())
+                            norm_c, c_cnts, _ = get_col_calls_cached(m_cl)
                             tot_c = len(norm_c)
 
                             pm_list = [g.strip().upper() for g in m_pm.split(',') if g.strip()]
@@ -4309,7 +4313,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         st.error(f"⛔ For marker **{m_info.get('marker_label', col_name)}**, Reference allele ({r_al}) and Variant allele ({v_al}) cannot be identical.")
                         mapping_has_errors = True
 
-                # Check for unmapped calls across all mapped columns to display summary advisory
+                # Check for unmapped calls across all mapped columns to display summary advisory (using cached calls)
                 total_unmapped_samples = 0
                 for col_name, m_info in mapped_marker_dict.items():
                     if col_name in df_raw.columns:
@@ -4317,9 +4321,8 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         p_set = {g.replace('/', '').replace('|', '').replace(' ', '') for g in p_list if g.strip()}
                         for g in list(p_set):
                             if len(g) == 2: p_set.add(g[1] + g[0])
-                        r_s = df_raw[col_name].dropna().astype(str).str.strip().str.upper()
-                        v_s = r_s[~r_s.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])].map(lambda v: v.replace('/', '').replace('|', '').replace(' ', ''))
-                        unm_cnt = sum(cnt for call, cnt in v_s.value_counts().items() if call not in p_set)
+                        _, c_counts, _ = get_col_calls_cached(col_name)
+                        unm_cnt = sum(cnt for call, cnt in c_counts.items() if call not in p_set)
                         total_unmapped_samples += unm_cnt
 
                 if total_unmapped_samples > 0:
