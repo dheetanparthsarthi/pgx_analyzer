@@ -23,7 +23,6 @@ import plotly.graph_objects as go
 import os
 import io
 import re
-import base64
 from collections import Counter
 from scipy import stats
 import pickle
@@ -4641,15 +4640,60 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     with p_col2:
                         st.download_button("📥 Download PDF Directly", data=pdf_bytes, file_name=f"{active_gene}_Population_Report.pdf", mime="application/pdf", use_container_width=True, key="btn_prev_dl_pdf")
 
-                    b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-                    pdf_iframe = (
-                        f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
-                        f'width="100%" height="820" type="application/pdf" '
-                        f'style="border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">'
-                        f'Your browser does not support embedded PDF preview. Please download the PDF above.'
-                        f'</iframe>'
+                    # Render the report's content as native Streamlit elements.
+                    # Chrome blocks the data-URL PDF embeds previously used here.
+                    overall_preview = full_results.get('overall', {})
+                    preview_snps = overall_preview.get('snps', {})
+                    preview_pgx = (
+                        overall_preview.get('pgx_summary')
+                        or overall_preview.get(f"{active_gene.lower()}_summary")
+                        or overall_preview.get('cyp2c19_summary')
+                        or overall_preview.get('cyp2c9_summary')
+                        or {}
                     )
-                    st.markdown(pdf_iframe, unsafe_allow_html=True)
+
+                    st.markdown(f"#### Cohort summary — {overall_preview.get('sample_count', 0):,} samples")
+                    hwe_preview_rows = []
+                    for snp_name, snp_data in preview_snps.items():
+                        hwe = snp_data.get('hwe', {})
+                        allele_freqs = snp_data.get('allele_freqs', {})
+                        hwe_preview_rows.append({
+                            'Biomarker': snp_name,
+                            'Valid N': snp_data.get('valid_samples', 0),
+                            'Allele frequencies': ', '.join(f'{a}: {f}' for a, f in allele_freqs.items()),
+                            'Chi-square': hwe.get('chi2_stat', 0),
+                            'P-value': hwe.get('p_value', 1),
+                            'Exact P-value': hwe.get('exact_p_value', 1),
+                            'HWE status': hwe.get('interpretation', 'No Data')
+                        })
+                    st.markdown("##### Hardy–Weinberg and allele summary")
+                    st.dataframe(pd.DataFrame(hwe_preview_rows), use_container_width=True, hide_index=True)
+
+                    phenotype_rows = [
+                        {'Phenotype': name, 'Count': info.get('count', 0), 'Percentage': f"{info.get('percentage', 0):.1f}%"}
+                        for name, info in preview_pgx.get('phenotypes', {}).items()
+                    ]
+                    st.markdown("##### Metabolizer phenotype summary")
+                    st.dataframe(pd.DataFrame(phenotype_rows), use_container_width=True, hide_index=True)
+
+                    region_preview_rows = []
+                    for region_name, region_data in full_results.get('regional', {}).items():
+                        region_pgx = (
+                            region_data.get('pgx_summary')
+                            or region_data.get(f"{active_gene.lower()}_summary")
+                            or region_data.get('cyp2c19_summary')
+                            or region_data.get('cyp2c9_summary')
+                            or {}
+                        )
+                        poor = region_pgx.get('phenotypes', {}).get('Poor Metabolizer', {})
+                        region_preview_rows.append({
+                            'Region': region_name,
+                            'Samples': region_data.get('sample_count', 0),
+                            'Poor metabolizers': poor.get('count', 0),
+                            'Poor metabolizer %': f"{poor.get('percentage', 0):.1f}%"
+                        })
+                    st.markdown("##### Regional summary")
+                    st.dataframe(pd.DataFrame(region_preview_rows), use_container_width=True, hide_index=True)
 
             if df_raw is not None and not df_raw.empty:
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
