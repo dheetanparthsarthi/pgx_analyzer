@@ -11,7 +11,7 @@ pinned: false
 
 # 🧬 Automated Population Pharmacogenomics Analysis Platform
 
-An industry-level, production-grade automated platform designed for genotype, allele frequency, Hardy–Weinberg Equilibrium (HWE), regional/gender demographic stratification, and CYP2C19 star allele / diplotype / CPIC phenotype classification.
+A population pharmacogenomics platform for genotype and allele frequencies, Hardy–Weinberg Equilibrium (HWE), regional/gender stratification, and rule-configured diplotype/phenotype classification. Marker-level analysis is data-driven; clinical translation is available for genes with validated rule bundles.
 
 ---
 
@@ -23,7 +23,7 @@ Currently, population pharmacogenomic analysis involves studying the distributio
 - **Automated Data Validation & QC**: Parses `.xlsx`, `.xls`, and `.csv` files, standardizing raw column headers, detecting duplicate Sample IDs, and quarantining invalid allele calls.
 - **Genetic & Statistical Engine**: Instantly computes genotype frequencies, allele frequencies ($p$ and $q$), observed vs. expected counts, Chi-Square goodness-of-fit statistics ($\chi^2$), P-values, and Haldane exact test fallbacks.
 - **Demographic & Regional Stratification**: Categorizes samples across 5 Indian geographic regions (**South India, North India, East India, West India, Central India**), 27+ individual state profiles, and Male vs. Female subgroups.
-- **CYP2C19 Star Allele & Phenotype Classifier**: Translates *2 (rs4244285), *3 (rs4986893), and *17 (rs12248560) variants into diplotypes (`*1/*1`, `*1/*2`, `*1/*17`, `*2/*17`, `*2/*2`, `*17/*17`) and CPIC Clinical Metabolizer Phenotypes (**Ultrarapid, Rapid, Normal, Intermediate, Poor Metabolizers**).
+- **Rule-Based Pharmacogenomic Classifier**: Uses shared translation code with per-gene marker, diplotype, and phenotype rules. CYP2C19 and CYP2C9 are configured today; other genes receive population marker statistics until validated translation rules are supplied.
 - **Multi-Format Exporters**: Generates publication-ready multi-tab Excel (`.xlsx`), summary CSV (`.csv`), and formal PDF (`.pdf`) summary reports with one click.
 
 ---
@@ -155,13 +155,13 @@ Samples are assigned to 5 geographic regions using a 3-tier lookup priority:
 ```
 analysis tools/
 ├── app.py                      # 9-Tab Streamlit Web Dashboard UI & Workflow Renderer
-├── config.py                   # Global SNP configurations, Gazetteer rules & CPIC matrix
+├── config.py                   # Marker definitions, translation rules & geographic mappings
 ├── core/                       # Core Analytical & Statistical Engine Package
 │   ├── __init__.py
 │   ├── qc.py                   # Data Quality Control, Validation & Cleaning Engine
 │   ├── stats.py                # Genotype, Allele Frequency & HWE Engine
 │   ├── stratification.py       # Demographic & Geographic Stratification Engine
-│   └── cyp2c19.py              # CYP2C19 Star Allele, Diplotype & Phenotype Classifier
+│   └── pgx_engine.py           # Gene-agnostic rule-based diplotype/phenotype engine
 ├── database/                   # Data Persistence Layer
 │   ├── __init__.py
 │   └── db_manager.py           # SQLite database manager for batch sample growth (1k -> 10k+)
@@ -173,7 +173,9 @@ analysis tools/
 │   ├── test_qc.py
 │   ├── test_stats.py
 │   ├── test_stratification.py
-│   ├── test_cyp2c19.py
+│   ├── test_pgx_engine.py
+│   ├── test_cyp2c19.py         # Regression cases using generic rule data
+│   ├── test_cyp2c9.py          # Regression cases using generic rule data
 │   ├── test_db_manager.py
 │   └── test_report_generator.py
 ├── .streamlit/                 # Streamlit UI server and theme configuration

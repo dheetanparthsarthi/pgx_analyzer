@@ -57,7 +57,7 @@ class GeneticStatsEngine:
     def analyze_snp(cls, series: pd.Series, snp_name: str, custom_info: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Performs full Genotype, Allele, and HWE analysis for a single SNP column.
-        Supports CYP2C19, CYP2C9, and generic/custom markers.
+        Supports configured and generic/custom biallelic markers.
         """
         clean_series = series.dropna().astype(str).str.strip().str.upper()
         clean_series = clean_series[~clean_series.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]

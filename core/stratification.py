@@ -1,7 +1,8 @@
-"""
-Demographic & Geographic Stratification Engine for Population Pharmacogenomics.
-Automatically groups datasets into Overall, Regional (North/South/East/West India),
-State-Wise (Individual States), and Gender subgroups, computing full genetic and pharmacogenomic parameters for each.
+"""Gene-agnostic demographic and population-genetics stratification.
+
+Marker statistics are computed for mapped markers in the active dataset.
+Diplotype and phenotype calls are added only when a validated rule bundle is
+configured for the selected gene.
 """
 
 import pandas as pd
@@ -9,10 +10,9 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 import re
 
-from config import STATE_TO_REGION, CITY_TO_STATE, SNP_CONFIG, CYP2C9_SNP_CONFIG
+from config import STATE_TO_REGION, CITY_TO_STATE, SNP_CONFIG, CYP2C9_SNP_CONFIG, GENE_TRANSLATION_RULES
 from core.stats import GeneticStatsEngine
-from core.cyp2c19 import CYP2C19Translator
-from core.cyp2c9 import CYP2C9Translator
+from core.pgx_engine import RuleBasedPGxEngine
 
 
 class DemographicStratifier:
@@ -85,9 +85,8 @@ class DemographicStratifier:
     @classmethod
     def stratify_and_analyze(cls, df: pd.DataFrame, custom_snp_rules: Optional[Dict] = None, active_gene: Optional[str] = None) -> Dict[str, Any]:
         """
-        Performs end-to-end demographic stratification and statistical calculations.
-        Detects target gene (CYP2C19, CYP2C9, or custom) and computes full CPIC diplotypes,
-        phenotypes, allele frequencies, HWE tests, and regional stratification.
+        Selects marker rules and optional translation rules for the active gene,
+        then computes marker statistics and demographic stratification.
         """
         data = df.copy()
         
@@ -114,14 +113,10 @@ class DemographicStratifier:
         else:
             active_snp_rules = {}
 
-        # Apply appropriate translator across full dataset
-        if is_cyp2c9:
-            data_processed, overall_pgx_summary = CYP2C9Translator.process_dataframe(data)
-        elif is_cyp2c19:
-            data_processed, overall_pgx_summary = CYP2C19Translator.process_dataframe(data)
-        else:
-            data_processed = data
-            overall_pgx_summary = {'diplotypes': {}, 'phenotypes': {}, 'total_samples': len(data), 'valid_pharmacogenomic_samples': 0}
+        # Use one generic engine; gene-specific translation behavior is supplied
+        # through declarative rule data, while unknown genes remain unclassified.
+        translation_rules = GENE_TRANSLATION_RULES.get(str(active_gene).upper())
+        data_processed, overall_pgx_summary = RuleBasedPGxEngine.process_dataframe(data, translation_rules)
         
         # Ensure State_Clean and Gender_Clean exist for sub-group stratification
         if 'State_Clean' not in data_processed.columns:
@@ -203,17 +198,14 @@ class DemographicStratifier:
                     sub_results['snps'][snp_name] = GeneticStatsEngine.analyze_snp(sub_df[matched_col], snp_name, custom_info=rule_info)
                     
             # Gene Translation Stats
+            _, pgx_sum = RuleBasedPGxEngine.process_dataframe(sub_df, translation_rules)
+            sub_results['pgx_summary'] = pgx_sum
+            sub_results[f"{str(active_gene).lower()}_summary"] = pgx_sum
+            # Preserve aliases used by older result views and saved integrations.
             if is_cyp2c9:
-                _, pgx_sum = CYP2C9Translator.process_dataframe(sub_df)
                 sub_results['cyp2c9_summary'] = pgx_sum
-                sub_results['cyp2c19_summary'] = pgx_sum  # For backward compatibility with existing tab views
-                sub_results['pgx_summary'] = pgx_sum
             elif is_cyp2c19:
-                _, pgx_sum = CYP2C19Translator.process_dataframe(sub_df)
                 sub_results['cyp2c19_summary'] = pgx_sum
-                sub_results['pgx_summary'] = pgx_sum
-            else:
-                sub_results['pgx_summary'] = {'phenotypes': {}, 'diplotypes': {}, 'total_samples': n_sub}
             
             return sub_results
 

@@ -35,8 +35,6 @@ except Exception:
 from core.qc import DataQCEngine
 from core.stratification import DemographicStratifier
 from core.stats import GeneticStatsEngine
-from core.cyp2c19 import CYP2C19Translator
-from core.cyp2c9 import CYP2C9Translator
 from database.db_manager import DatabaseManager
 from reports.report_generator import ReportGenerator
 from config import SNP_CONFIG, CYP2C9_SNP_CONFIG, PHENOTYPE_ORDER, CYP2C9_PHENOTYPE_ORDER, STATE_TO_REGION

@@ -144,7 +144,7 @@ SNP_CONFIG: Dict[str, Dict] = {
         'rsid': 'rs4986893',
         'ref_allele': 'G',
         'var_allele': 'A',
-        'valid_genotypes': {'GG'},
+        'valid_genotypes': {'GG', 'GA', 'AA'},
         'wildtype_genotype': 'GG',
         'het_genotype': 'GA',
         'hom_var_genotype': 'AA'
@@ -261,3 +261,46 @@ CYP2C9_CLINICAL_GUIDELINES: Dict[str, Dict[str, str]] = {
 }
 
 ALPHA_SIGNIFICANCE: float = 0.05
+
+# Translation data consumed by the generic RuleBasedPGxEngine. This keeps
+# gene-specific biology in declarative rule data rather than separate code.
+GENE_TRANSLATION_RULES: Dict[str, Dict] = {
+    'CYP2C19': {
+        'markers': {
+            'CYP2C19*2': {'genotype_dosage': {'GG': 0, 'GA': 1, 'AG': 1, 'AA': 2}},
+            'CYP2C19*3': {'genotype_dosage': {'GG': 0, 'GA': 1, 'AG': 1, 'AA': 2}},
+            'CYP2C19*17': {'genotype_dosage': {'CC': 0, 'CT': 1, 'TC': 1, 'TT': 2}},
+        },
+        # Keys are per-marker variant-allele dosages in marker order.
+        'diplotype_rules': {
+            '0,0,0': '*1/*1',
+            '1,0,0': '*1/*2',
+            '2,0,0': '*2/*2',
+            '0,1,0': '*1/*3',
+            '0,2,0': '*3/*3',
+            '0,0,1': '*1/*17',
+            '0,0,2': '*17/*17',
+            '1,1,0': '*2/*3',
+            '1,0,1': '*2/*17',
+            '0,1,1': '*3/*17',
+        },
+        'phenotype_map': DIPLOTYPE_PHENOTYPE_MAP,
+        'phenotype_order': PHENOTYPE_ORDER,
+    },
+    'CYP2C9': {
+        'markers': {
+            'CYP2C9*2': {'genotype_dosage': {'CC': 0, 'CT': 1, 'TC': 1, 'TT': 2}},
+            'CYP2C9*3': {'genotype_dosage': {'AA': 0, 'AC': 1, 'CA': 1, 'CC': 2}},
+        },
+        'diplotype_rules': {
+            '0,0': '*1/*1',
+            '1,0': '*1/*2',
+            '0,1': '*1/*3',
+            '2,0': '*2/*2',
+            '1,1': '*2/*3',
+            '0,2': '*3/*3',
+        },
+        'phenotype_map': CYP2C9_DIPLOTYPE_PHENOTYPE_MAP,
+        'phenotype_order': CYP2C9_PHENOTYPE_ORDER,
+    },
+}

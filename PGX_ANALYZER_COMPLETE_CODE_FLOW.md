@@ -9,7 +9,7 @@
 4. [Stage 4: Executing the Fast Compute Pipeline (`run_fast_pipeline`)](#stage-4-executing-the-fast-compute-pipeline-run_fast_pipeline)
 5. [Stage 5: Detailed Calculation Engine Flow](#stage-5-detailed-calculation-engine-flow)
    - [5.1 Quality Audit & Invalid Call Filtering (`core/qc.py`)](#51-quality-audit--invalid-call-filtering-coreqcpy)
-   - [5.2 Star-Allele Calling & Phenotype Classification (`core/cyp2c19.py`)](#52-star-allele-calling--phenotype-classification-corecyp2c19py)
+   - [5.2 Rule-Based Diplotype & Phenotype Classification (`core/pgx_engine.py`)](#52-rule-based-diplotype--phenotype-classification-corepgx_enginepy)
    - [5.3 Hardy-Weinberg Statistics & Allele Frequencies (`core/stats.py`)](#53-hardy-weinberg-statistics--allele-frequencies-corestatspy)
    - [5.4 Geographic & Demographic Stratification (`core/stratification.py`)](#54-geographic--demographic-stratification-corestratificationpy)
 6. [Stage 6: Relational SQLite Storage Insertion (`database/db_manager.py`)](#stage-6-relational-sqlite-storage-insertion-databasedb_managerpy)
@@ -170,7 +170,9 @@ def run_fast_pipeline(df: pd.DataFrame, mapped_cols_tuple: tuple):
     clean_df, qc_report = DataQCEngine(df, custom_col_mapping=mapped_dict).run_qc()
     
     # Step B: Star Allele Calling & CPIC Phenotype Assignment
-    pgx_df, pgx_summary = CYP2C19Translator.process_dataframe(clean_df)
+    full_results = DemographicStratifier.stratify_and_analyze(
+        clean_df, custom_snp_rules=snp_rules, active_gene=active_gene
+    )
     
     # Step C: Population Genetics & Demographic Stratification
     full_results = PopulationStratifier.analyze_full_dataset(pgx_df)
@@ -227,7 +229,17 @@ def run_qc(self) -> Tuple[pd.DataFrame, Dict[str, Any]]:
 
 ---
 
-### 5.2 Star-Allele Calling & Phenotype Classification (`core/cyp2c19.py`)
+### 5.2 Rule-Based Diplotype & Phenotype Classification (`core/pgx_engine.py`)
+
+`RuleBasedPGxEngine` is the shared implementation for all configured genes. It
+accepts marker genotype-to-dosage maps, a dosage-pattern-to-diplotype table, and
+a diplotype-to-phenotype map. The marker order in the rule bundle determines
+the dosage-pattern order. The same engine supports one or many markers; calls
+that are missing, invalid, or absent from the configured table are returned as
+indeterminate. Rule bundles currently live in `GENE_TRANSLATION_RULES` in
+`config.py` for CYP2C19 and CYP2C9. Other genes can still receive marker-level
+population statistics, but need validated gene-specific rules before clinical
+diplotype or phenotype calls can be made.
 ```python
 def assign_sample_diplotype(row: pd.Series) -> Tuple[str, str]:
     g_cyp2 = str(row.get('CYP2C19*2', '')).strip().upper() if pd.notna(row.get('CYP2C19*2')) else None

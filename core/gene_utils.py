@@ -4,6 +4,7 @@ Provides standardized discovery, parsing, and defaults for Pharmacogenetic targe
 """
 import os
 import re
+from functools import lru_cache
 from typing import List, Optional
 import pandas as pd
 
@@ -12,6 +13,7 @@ KNOWN_PGX_GENES = [
     'DPYD', 'TPMT', 'NUDT15', 'SLCO1B1', 'UGT1A1', 'HLA-B', 'HLA-A', 'G6PD', 'CYP1A2', 'CYP2B6'
 ]
 
+@lru_cache(maxsize=1)
 def load_marker_catalog_file() -> pd.DataFrame:
     """Loads markers from List of markers_v1.xlsx if present."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,10 +32,24 @@ def load_marker_catalog_file() -> pd.DataFrame:
 def get_column_gene(col_name: str) -> str:
     """Returns the gene symbol found in a column header, if any."""
     c_clean = str(col_name).upper().replace("_", "").replace("-", "").replace(" ", "")
-    for g in sorted(KNOWN_PGX_GENES, key=len, reverse=True):
+    genes = set(KNOWN_PGX_GENES)
+    catalog = load_marker_catalog_file()
+    if not catalog.empty and 'Gene' in catalog.columns:
+        genes.update(catalog['Gene'].dropna().astype(str).str.strip().tolist())
+    for g in sorted(genes, key=len, reverse=True):
         g_clean = g.upper().replace("_", "").replace("-", "")
         if g_clean in c_clean:
             return g
+
+    # rsIDs provide a safer dynamic association than generic labels such as *2.
+    rsids = set(re.findall(r'rs\d+', str(col_name).lower()))
+    if rsids and not catalog.empty and {'Gene', 'Marker'}.issubset(catalog.columns):
+        for _, item in catalog.iterrows():
+            marker_rsids = set(re.findall(r'rs\d+', str(item.get('Marker', '')).lower()))
+            if rsids.intersection(marker_rsids):
+                gene = str(item.get('Gene', '')).strip()
+                if gene:
+                    return gene
     return ""
 
 def detect_genes_in_columns(cols: list) -> List[str]:
@@ -193,4 +209,3 @@ def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame, active_gen
 
     merged_df = pd.concat([base_df, new_aligned], ignore_index=True)
     return merged_df, alignment_log
-

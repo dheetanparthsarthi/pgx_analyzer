@@ -8,7 +8,7 @@
 3. [Complete Codebase File-by-File Technical Breakdown](#3-complete-codebase-file-by-file-technical-breakdown)
    - [3.1 Central Configuration (`config.py`)](#31-central-configuration-configpy)
    - [3.2 Data Quality Control & Audit Engine (`core/qc.py`)](#32-data-quality-control--audit-engine-coreqcpy)
-   - [3.3 Pharmacogenomic Diplotype Caller (`core/cyp2c19.py`)](#33-pharmacogenomic-diplotype-caller-corecyp2c19py)
+   - [3.3 Generic Rule-Based PGx Engine (`core/pgx_engine.py`)](#33-generic-rule-based-pgx-engine-corepgx_enginepy)
    - [3.4 Population Genetics & HWE Statistical Engine (`core/stats.py`)](#34-population-genetics--hwe-statistical-engine-corestatspy)
    - [3.5 Geographic & Demographic Stratification (`core/stratification.py`)](#35-geographic--demographic-stratification-corestratificationpy)
    - [3.6 SQLite Database Storage Layer (`database/db_manager.py`)](#36-sqlite-database-storage-layer-databasedb_managerpy)
@@ -134,22 +134,11 @@ Class **`DataQCEngine`** cleans raw file headers, detects duplicates, standardiz
 
 ---
 
-### 3.3 Pharmacogenomic Diplotype Caller (`core/cyp2c19.py`)
+### 3.3 Generic Rule-Based PGx Engine (`core/pgx_engine.py`)
 
-Class **`CYP2C19Translator`** executes star-allele haplotype matching and diplotype-to-phenotype translation.
+Class **`RuleBasedPGxEngine`** applies declarative rule bundles supplied by `config.py`. Marker order, genotype-to-variant dosage maps, diplotype pattern maps, and phenotype maps are data; the engine contains no CYP-specific branching. The same implementation accepts a one-marker rule bundle or a bundle with any number of markers. Missing or invalid required calls produce an `Indeterminate` result. A gene without a translation bundle remains `Not configured` for clinical interpretation while its general marker statistics are calculated by the statistics engine.
 
-#### Key Functions & Code Logic:
-- **`assign_sample_diplotype(row: pd.Series)`**:
-  - Counts variant allele copies:
-    ```python
-    star2_count = 2 if g_cyp2 == 'AA' else (1 if g_cyp2 in ['GA', 'AG'] else 0)
-    star3_count = 2 if g_cyp3 == 'AA' else (1 if g_cyp3 in ['GA', 'AG'] else 0)
-    star17_count = 2 if g_cyp17 == 'TT' else (1 if g_cyp17 in ['CT', 'TC'] else 0)
-    ```
-  - Evaluates decision tree logic to call diplotypes (`*1/*1`, `*1/*2`, `*2/*2`, `*17/*17`, etc.).
-  - Looks up metabolizer phenotypes in `DIPLOTYPE_PHENOTYPE_MAP`.
-- **`process_dataframe(df: pd.DataFrame)`**:
-  - Iterates through DataFrame rows using `df.iterrows()`, appends `Diplotype` and `Phenotype` columns, and compiles population summary statistics (counts, frequencies, percentages).
+Add or review gene definitions in `GENE_TRANSLATION_RULES`; each bundle defines its markers, `genotype_dosage` values, `diplotype_rules`, `phenotype_map`, and optional `phenotype_order`.
 
 ---
 
@@ -238,7 +227,7 @@ Contains the Streamlit presentation layer, session state lifecycle management, c
                ▼
 [Phase 4: Fast Pipeline Execution (run_fast_pipeline)]
   ├── 1. DataQCEngine.run_qc() (Clean headers, detect duplicates, filter invalid genotypes)
-  ├── 2. CYP2C19Translator.process_dataframe() (Call star alleles, assign CPIC phenotypes)
+  ├── 2. RuleBasedPGxEngine.process_dataframe() (Apply configured rule bundle, if available)
   ├── 3. GeneticStatsEngine.analyze_snp() (Compute allele freqs, expected counts, HWE χ² stats)
   └── 4. PopulationStratifier.analyze_full_dataset() (Slice by state, region, gender)
                │
