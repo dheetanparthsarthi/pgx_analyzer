@@ -4126,8 +4126,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             mapping_has_errors = True
 
                         identical_alleles = bool(ref_val == var_val and ref_val != '')
-                        if identical_alleles:
-                            mapping_has_errors = True
 
                         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                         c_flg1, c_flg2 = st.columns([1.5, 1.5])
@@ -4209,9 +4207,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                         args=(ref_key, var_key, cand_r, cand_v, f"sel_ref_choice_{idx}", f"sel_var_choice_{idx}")
                                     )
 
-                                # Flag: Identical Alleles
+                                # A marker can be monomorphic in this cohort. Keep
+                                # the mapping and report its single observed allele;
+                                # statistical analysis handles it as monomorphic.
                                 if identical_alleles:
-                                    st.error(f"⛔ FLAG: Reference allele ({ref_val}) and Variant allele ({var_val}) cannot be identical!")
+                                    st.info(f"ℹ️ Monomorphic marker: both allele fields are {ref_val}. Genotype/allele counts will be reported for this single allele; HWE and clinical translation are not informative for this marker.")
 
                         if sel_col != "(Select Column)" and sel_col in df_raw.columns:
                             v_al_stored = 'A' if var_val == 'None' else var_val.strip().upper()
@@ -4519,14 +4519,6 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 total_configured_targets = len(sel_map_markers) + len(extra_rows)
                 if len(mapped_marker_dict) < total_configured_targets:
                     mapping_has_errors = True
-
-                # Check for Identical Reference and Variant Alleles
-                for col_name, m_info in mapped_marker_dict.items():
-                    r_al = m_info.get('ref_allele', '')
-                    v_al = m_info.get('var_allele', '')
-                    if r_al and v_al and r_al == v_al and v_al != 'None':
-                        st.error(f"⛔ For marker **{m_info.get('marker_label', col_name)}**, Reference allele ({r_al}) and Variant allele ({v_al}) cannot be identical.")
-                        mapping_has_errors = True
 
                 # Check for unmapped calls across all mapped columns to display summary advisory (using cached calls)
                 total_unmapped_samples = 0

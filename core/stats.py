@@ -100,6 +100,53 @@ class GeneticStatsEngine:
         het_gen = cls._normalize_genotype_call(snp_info.get('het_genotype') or f"{ref_allele}{var_allele}")
         var_gen = cls._normalize_genotype_call(snp_info.get('hom_var_genotype') or f"{var_allele}{var_allele}")
 
+        # An explicitly identical reference/variant label means this cohort's
+        # marker is being analyzed as monomorphic. Report its observed genotype
+        # and allele once (dict keys cannot represent duplicate allele labels),
+        # and do not present a meaningless biallelic HWE test.
+        if ref_allele == var_allele:
+            mono_gen = cls._normalize_genotype_call(f"{ref_allele}{ref_allele}")
+            mono_count = int(clean_series.eq(mono_gen).sum())
+            if mono_count == 0:
+                return {
+                    'snp_name': snp_name,
+                    'valid_samples': 0,
+                    'genotype_counts': {mono_gen: 0},
+                    'genotype_freqs': {mono_gen: 0.0},
+                    'genotype_pcts': {mono_gen: 0.0},
+                    'allele_counts': {ref_allele: 0},
+                    'allele_freqs': {ref_allele: 0.0},
+                    'allele_pcts': {ref_allele: 0.0},
+                    'hwe': {
+                        'expected_counts': {mono_gen: 0.0},
+                        'expected_freqs': {mono_gen: 0.0},
+                        'chi2_stat': 0.0,
+                        'df': 0,
+                        'p_value': 1.0,
+                        'exact_p_value': 1.0,
+                        'interpretation': 'Monomorphic; HWE not informative'
+                    }
+                }
+            return {
+                'snp_name': snp_name,
+                'valid_samples': mono_count,
+                'genotype_counts': {mono_gen: mono_count},
+                'genotype_freqs': {mono_gen: 1.0},
+                'genotype_pcts': {mono_gen: 100.0},
+                'allele_counts': {ref_allele: 2 * mono_count},
+                'allele_freqs': {ref_allele: 1.0},
+                'allele_pcts': {ref_allele: 100.0},
+                'hwe': {
+                    'expected_counts': {mono_gen: float(mono_count)},
+                    'expected_freqs': {mono_gen: 1.0},
+                    'chi2_stat': 0.0,
+                    'df': 0,
+                    'p_value': 1.0,
+                    'exact_p_value': 1.0,
+                    'interpretation': 'Monomorphic; HWE not informative'
+                }
+            }
+
         ref_calls = {cls._normalize_genotype_call(f"{ref_allele}{ref_allele}"), wt_gen}
         het_calls = {cls._normalize_genotype_call(f"{ref_allele}{var_allele}"), cls._normalize_genotype_call(f"{var_allele}{ref_allele}"), het_gen}
         var_calls = {cls._normalize_genotype_call(f"{var_allele}{var_allele}"), var_gen}

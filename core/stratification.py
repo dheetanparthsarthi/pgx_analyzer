@@ -116,6 +116,18 @@ class DemographicStratifier:
         # Use one generic engine; gene-specific translation behavior is supplied
         # through declarative rule data, while unknown genes remain unclassified.
         translation_rules = GENE_TRANSLATION_RULES.get(str(active_gene).upper())
+        # Identical configured alleles represent a monomorphic marker, not a
+        # valid reference/variant distinction for clinical diplotype calling.
+        # Keep population statistics, but avoid applying clinical rules that
+        # assume the marker distinguishes two different alleles.
+        has_monomorphic_marker = any(
+            str(rule.get('ref_allele', '')).strip().upper()
+            == str(rule.get('var_allele', '')).strip().upper()
+            and str(rule.get('ref_allele', '')).strip()
+            for rule in (custom_snp_rules or {}).values()
+        )
+        if has_monomorphic_marker:
+            translation_rules = None
         data_processed, overall_pgx_summary = RuleBasedPGxEngine.process_dataframe(data, translation_rules)
         
         # Ensure State_Clean and Gender_Clean exist for sub-group stratification
