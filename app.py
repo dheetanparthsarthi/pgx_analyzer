@@ -2348,7 +2348,14 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 fig_g2.update_layout(height=280, margin=dict(l=20, r=20, t=35, b=20))
                 st.plotly_chart(fig_g2, use_container_width=True)
             else:
-                st.info("No gender-stratified phenotype calls available.")
+                configured_by_group = [
+                    (group_data.get('pgx_summary') or group_data.get(f"{active_gene.lower()}_summary") or {}).get('translation_configured', False)
+                    for group_data in gender_data.values()
+                ]
+                if not any(configured_by_group):
+                    st.info("No gender-stratified phenotype calls are available because this gene and marker panel have no configured translation rules. Configure validated diplotype and phenotype rules in the Gene Calling tab; marker genotype and allele comparisons remain available here.")
+                else:
+                    st.info("Translation rules are configured, but no gender-group samples matched a determinate diplotype pattern. Check marker coverage and missing or invalid genotype calls.")
 
         with cg2:
             sel_gender_marker = st.selectbox("Select Biomarker to Compare:", active_markers, key="gender_biomarker_sel") if len(active_markers) > 1 else (active_markers[0] if active_markers else 'Biomarker')
@@ -2501,6 +2508,12 @@ def render_unified_results(full_results: dict, qc_report: dict):
                     row[category] = f"{metric.get('count', 0)} ({metric.get('percentage', 0.0):.1f}%)"
                 state_diplotype_matrix.append(row)
             st.dataframe(pd.DataFrame(state_diplotype_matrix), use_container_width=True, hide_index=True)
+        else:
+            mapped_state = 'State_Clean' in processed_df.columns and processed_df['State_Clean'].astype(str).str.strip().ne('').any()
+            if mapped_state:
+                st.info("No state profiles could be summarized from the mapped state values. Check that the selected state/locality column contains non-empty values.")
+            else:
+                st.info("No state or locality column is currently mapped. Map a state/locality column during Upload or Map Columns, then recalculate to populate individual profiles. Geographic-group summaries are available in the Geographic Groups tab when a region column is mapped.")
 
 # -----------------------------------------------------------------------------
 # 3-STEP WORKFLOW PIPELINE RENDERER (EXACT MATCH FOR USER SCREENSHOTS 1, 2, 3, 4, 5)

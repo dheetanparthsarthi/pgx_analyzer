@@ -130,16 +130,22 @@ class DataQCEngine:
         if 'Gender' in df.columns:
             gender_series = self._get_series(df, 'Gender').astype(str).str.strip().str.lower()
             gender_map = {
-                'male': 'Male', 'm': 'Male',
-                'female': 'Female', 'f': 'Female',
-                'null': 'Unknown', 'not mentioned': 'Unknown', 'not specified': 'Unknown', 'nan': 'Unknown'
+                'male': 'Male', 'm': 'Male', 'man': 'Male',
+                'female': 'Female', 'f': 'Female', 'woman': 'Female',
             }
-            df['Gender_Clean'] = gender_series.map(lambda x: gender_map.get(x, 'Unknown'))
+            missing_gender = {'', 'null', 'none', 'not mentioned', 'not specified', 'nan', 'na', 'unknown'}
+            df['Gender_Clean'] = gender_series.map(
+                lambda value: 'Unknown' if value in missing_gender else gender_map.get(value, value.title())
+            )
         else:
             df['Gender_Clean'] = 'Unknown'
             
         # Clean State & Native Place
-        df['State_Clean'] = self._get_series(df, 'State').astype(str).str.strip() if 'State' in df.columns else ''
+        if 'State' in df.columns:
+            state_values = self._get_series(df, 'State').astype(str).str.strip()
+            df['State_Clean'] = state_values.mask(state_values.str.lower().isin({'', 'nan', 'none', 'null', '<na>', 'unknown'}), '')
+        else:
+            df['State_Clean'] = ''
         df['Native_Place_Clean'] = self._get_series(df, 'Native_Place').astype(str).str.strip() if 'Native_Place' in df.columns else ''
 
         # Determine target genotype / marker columns dynamically
@@ -245,4 +251,3 @@ class DataQCEngine:
         }
         
         return self.clean_df, self.qc_report
-

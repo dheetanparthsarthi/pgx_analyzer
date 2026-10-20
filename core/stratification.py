@@ -17,6 +17,73 @@ from core.pgx_engine import RuleBasedPGxEngine
 
 class DemographicStratifier:
     @staticmethod
+    def _adapt_translation_rules(
+        translation_rules: Optional[Dict],
+        data: pd.DataFrame,
+        snp_rules: Optional[Dict],
+    ) -> Optional[Dict]:
+        """Project known translation tables onto the usable uploaded markers.
+
+        Marker dosage is calculated from the alleles configured for this
+        upload. Missing or monomorphic markers are omitted, and a projected
+        dosage pattern is retained only when it resolves to one diplotype.
+        """
+        if not translation_rules:
+            return None
+
+        configured_markers = translation_rules.get('markers', {})
+        original_diplotypes = translation_rules.get('diplotype_rules', {})
+        marker_indexes = []
+        usable_markers = {}
+
+        for index, (marker, marker_rule) in enumerate(configured_markers.items()):
+            if marker not in data.columns:
+                continue
+            allele_rule = (snp_rules or {}).get(marker, {})
+            ref = str(allele_rule.get('ref_allele', '')).strip().upper()
+            var = str(allele_rule.get('var_allele', '')).strip().upper()
+            if ref and var:
+                # Identical labels do not distinguish reference from variant.
+                if ref == var:
+                    continue
+                dosage_map = {
+                    ref + ref: 0,
+                    ref + var: 1,
+                    var + ref: 1,
+                    var + var: 2,
+                }
+                usable_markers[marker] = {'genotype_dosage': dosage_map}
+            else:
+                usable_markers[marker] = marker_rule
+            marker_indexes.append(index)
+
+        if not usable_markers:
+            return None
+
+        projected: Dict[str, set] = {}
+        for full_pattern, diplotype in original_diplotypes.items():
+            values = str(full_pattern).split(',')
+            if len(values) != len(configured_markers):
+                continue
+            pattern = ','.join(values[index] for index in marker_indexes)
+            projected.setdefault(pattern, set()).add(str(diplotype))
+
+        # Do not guess when dropping a marker collapses distinct diplotypes
+        # into the same observable dosage pattern.
+        usable_diplotypes = {
+            pattern: next(iter(diplotypes))
+            for pattern, diplotypes in projected.items()
+            if len(diplotypes) == 1
+        }
+        if not usable_diplotypes:
+            return None
+
+        adapted = dict(translation_rules)
+        adapted['markers'] = usable_markers
+        adapted['diplotype_rules'] = usable_diplotypes
+        return adapted
+
+    @staticmethod
     def assign_region(row: pd.Series) -> str:
         """
         Assigns geographic region (North India, South India, East India, West India, Central India)
@@ -122,19 +189,8 @@ class DemographicStratifier:
         # Use one generic engine; gene-specific translation behavior is supplied
         # through declarative rule data, while unknown genes remain unclassified.
         translation_rules = (custom_translation_rules or {}).get(str(active_gene).upper()) or GENE_TRANSLATION_RULES.get(str(active_gene).upper())
-        # Identical configured alleles represent a monomorphic marker, not a
-        # valid reference/variant distinction for clinical diplotype calling.
-        # Keep population statistics, but avoid applying clinical rules that
-        # assume the marker distinguishes two different alleles.
-        has_monomorphic_marker = any(
-            str(rule.get('ref_allele', '')).strip().upper()
-            == str(rule.get('var_allele', '')).strip().upper()
-            and str(rule.get('ref_allele', '')).strip()
-            for rule in (custom_snp_rules or {}).values()
-        )
-        has_user_translation = bool((custom_translation_rules or {}).get(str(active_gene).upper()))
-        if has_monomorphic_marker and not has_user_translation:
-            translation_rules = None
+        if not (custom_translation_rules or {}).get(str(active_gene).upper()):
+            translation_rules = cls._adapt_translation_rules(translation_rules, data, custom_snp_rules)
         data_processed, overall_pgx_summary = RuleBasedPGxEngine.process_dataframe(data, translation_rules)
         
         # Ensure State_Clean and Gender_Clean exist for sub-group stratification
