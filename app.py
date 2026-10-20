@@ -2486,18 +2486,22 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
         if step_cols[0].button("1 · Select Target", use_container_width=True, type=t1, key="nav_btn_step1"):
             st.session_state['workflow_step'] = '1 · Select Target'
+            save_active_session()
             st.rerun()
 
         if step_cols[1].button("2 · Upload", use_container_width=True, type=t2, key="nav_btn_step2"):
             st.session_state['workflow_step'] = '2 · Upload'
+            save_active_session()
             st.rerun()
 
         if step_cols[2].button("3 · Map columns", use_container_width=True, type=t3, key="nav_btn_step3"):
             st.session_state['workflow_step'] = '3 · Map columns'
+            save_active_session()
             st.rerun()
 
         if step_cols[3].button("4 · Results", use_container_width=True, type=t4, key="nav_btn_step4"):
             st.session_state['workflow_step'] = '4 · Results'
+            save_active_session()
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -2510,6 +2514,16 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
         if st.session_state['workflow_step'] == '1 · Select Target':
             st.markdown("## 1️⃣ Select Pharmacogenetic Target (Gene & Biomarkers)")
             st.caption("Choose which gene and specific biomarker(s) to analyze. Only your selected markers will be uploaded, mapped, and visualized.")
+
+            if has_active_data():
+                c_wb1, c_wb2 = st.columns([1.5, 0.5])
+                with c_wb1:
+                    st.info(f"📂 **Active Dataset Loaded**: `{len(df_raw):,} samples` in workspace. You can change your target gene and re-map columns anytime, or view your current results.")
+                with c_wb2:
+                    if st.button("📊 View Results (Step 4) →", use_container_width=True, key="btn_step1_jump_res"):
+                        st.session_state['workflow_step'] = '4 · Results'
+                        save_active_session()
+                        st.rerun()
 
             catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else ['CYP2C19']
             custom_genes = st.session_state.get('custom_genes', [])
@@ -4420,7 +4434,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             st.markdown("### Export")
             st.caption("Download the full result set for the current group selection.")
 
-            e1, e2, e3, e_remap = st.columns([0.25, 0.25, 0.25, 0.25])
+            e1, e2, e3, e_remap, e_retarget = st.columns([0.22, 0.22, 0.22, 0.17, 0.17])
 
             rep_gen = ReportGenerator(full_results, qc_report) if has_active_data() else None
 
@@ -4448,6 +4462,13 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             with e_remap:
                 if st.button("← Re-map columns", use_container_width=True, key="btn_res_remap"):
                     st.session_state['workflow_step'] = '3 · Map columns'
+                    save_active_session()
+                    st.rerun()
+
+            with e_retarget:
+                if st.button("🎯 Change Target Gene", use_container_width=True, key="btn_res_retarget", help="Switch target gene or select different biomarkers"):
+                    st.session_state['workflow_step'] = '1 · Select Target'
+                    save_active_session()
                     st.rerun()
 
             if df_raw is not None and not df_raw.empty:
