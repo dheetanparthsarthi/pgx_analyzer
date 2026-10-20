@@ -4695,9 +4695,38 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     st.markdown("##### Regional summary")
                     st.dataframe(pd.DataFrame(region_preview_rows), use_container_width=True, hide_index=True)
 
+                    gender_preview_rows = []
+                    for g_name in ['Male', 'Female']:
+                        g_data = full_results.get('gender', {}).get(g_name, {})
+                        if g_data.get('sample_count', 0) > 0:
+                            g_pgx = (
+                                g_data.get('pgx_summary')
+                                or g_data.get(f"{active_gene.lower()}_summary")
+                                or g_data.get('cyp2c19_summary')
+                                or g_data.get('cyp2c9_summary')
+                                or {}
+                            ).get('phenotypes', {})
+                            nm_p = g_pgx.get('Normal Metabolizer', g_pgx.get('Normal Metabolizer (NM)', {})).get('percentage', 0)
+                            im_p = g_pgx.get('Intermediate Metabolizer', g_pgx.get('Intermediate Metabolizer (IM)', {})).get('percentage', 0)
+                            pm_p = g_pgx.get('Poor Metabolizer', g_pgx.get('Poor Metabolizer (PM)', {})).get('percentage', 0)
+                            gender_preview_rows.append({
+                                'Gender': g_name,
+                                'Samples': g_data.get('sample_count', 0),
+                                'Normal Metabolizer %': f"{nm_p:.1f}%",
+                                'Intermediate Metabolizer %': f"{im_p:.1f}%",
+                                'Poor Metabolizer %': f"{pm_p:.1f}%"
+                            })
+                    if gender_preview_rows:
+                        st.markdown("##### Gender stratification summary")
+                        st.dataframe(pd.DataFrame(gender_preview_rows), use_container_width=True, hide_index=True)
+
             if df_raw is not None and not df_raw.empty:
-                st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
                 target_full_df = processed_df if (processed_df is not None and not processed_df.empty) else df_raw
+                
+                with st.expander(f"📋 Complete Classified Dataset Preview ({len(target_full_df):,} samples, {len(target_full_df.columns)} columns)", expanded=True):
+                    st.dataframe(target_full_df, use_container_width=True)
+
                 c_full_dl1, c_full_dl2 = st.columns(2)
                 with c_full_dl1:
                     label_desc = "⬇️ Download Complete Classified Dataset (.xlsx)" if (processed_df is not None and not processed_df.empty) else "⬇️ Download Complete Dataset (.xlsx)"
