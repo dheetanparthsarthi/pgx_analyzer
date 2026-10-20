@@ -16,18 +16,31 @@ class CYP2C19Translator:
         Translates a single sample's SNP genotypes (CYP2C19*2, *3, *17) 
         into a Diplotype (*1/*1, *1/*2, etc.) and CPIC Metabolizer Phenotype.
         """
-        g_cyp2 = str(row.get('CYP2C19*2', '')).strip().upper() if pd.notna(row.get('CYP2C19*2')) else None
-        g_cyp3 = str(row.get('CYP2C19*3', '')).strip().upper() if pd.notna(row.get('CYP2C19*3')) else None
-        g_cyp17 = str(row.get('CYP2C19*17', '')).strip().upper() if pd.notna(row.get('CYP2C19*17')) else None
+        # Flexible retrieval of *2, *3, *17 genotypes supporting different column names and formats
+        g_cyp2 = None
+        g_cyp3 = None
+        g_cyp17 = None
+        for col in row.index:
+            c_norm = str(col).lower().replace(" ", "").replace("_", "").replace("-", "")
+            val = row.get(col)
+            if pd.isna(val) or str(val).strip().upper() in ['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN']:
+                continue
+            clean_val = str(val).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
+            if "*17" in c_norm or "rs12248560" in c_norm or "cyp2c19_17" in c_norm or "cyp2c19*17" in c_norm or "c.-806" in c_norm:
+                g_cyp17 = clean_val
+            elif "*2" in c_norm or "rs4244285" in c_norm or "cyp2c19_2" in c_norm or "cyp2c19*2" in c_norm or "c.681" in c_norm:
+                g_cyp2 = clean_val
+            elif "*3" in c_norm or "rs4986893" in c_norm or "cyp2c19_3" in c_norm or "cyp2c19*3" in c_norm or "c.636" in c_norm:
+                g_cyp3 = clean_val
 
         # Check missingness
         if not g_cyp2 and not g_cyp3 and not g_cyp17:
             return 'Indeterminate', 'Indeterminate'
             
-        # Count variant alleles for *2 (GA=1, AA=2), *3 (GA=1, AA=2), *17 (CT=1, TT=2)
-        star2_count = 2 if g_cyp2 == 'AA' else (1 if g_cyp2 == 'GA' else 0)
-        star3_count = 2 if g_cyp3 == 'AA' else (1 if g_cyp3 == 'GA' else 0)
-        star17_count = 2 if g_cyp17 == 'TT' else (1 if g_cyp17 == 'CT' else 0)
+        # Count variant alleles for *2 (GA/AG=1, AA=2), *3 (GA/AG=1, AA=2), *17 (CT/TC=1, TT=2)
+        star2_count = 2 if g_cyp2 == 'AA' else (1 if g_cyp2 in ('GA', 'AG') else 0)
+        star3_count = 2 if g_cyp3 == 'AA' else (1 if g_cyp3 in ('GA', 'AG') else 0)
+        star17_count = 2 if g_cyp17 == 'TT' else (1 if g_cyp17 in ('CT', 'TC') else 0)
         
         # Diplotype calling rules
         if star2_count == 2:

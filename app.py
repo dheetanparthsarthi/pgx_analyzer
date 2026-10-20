@@ -2454,6 +2454,8 @@ def render_unified_results(full_results: dict, qc_report: dict):
             state_pheno_matrix.append(tot_row)
 
             st.dataframe(pd.DataFrame(state_pheno_matrix), use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ **No State-Wise Profiles Available:** A State or Region column was not detected or selected in your uploaded dataset. To enable state-level profiles and regional stratification, ensure your spreadsheet has a column named `State` or `Region` mapped in Step 3.")
 
 # -----------------------------------------------------------------------------
 # 3-STEP WORKFLOW PIPELINE RENDERER (EXACT MATCH FOR USER SCREENSHOTS 1, 2, 3, 4, 5)
@@ -4522,9 +4524,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                         # RESTRICT DATASET: RETAIN ONLY MAPPED COLUMNS & ENFORCE PERMITTED GENOTYPES
                         if df_raw is not None and not df_raw.empty:
-                            cols_to_keep = [c for c in df_raw.columns if c in final_mapping]
-                            if cols_to_keep:
-                                filtered_df = df_raw[cols_to_keep].copy()
+                            # Preserve all mapped columns as well as any detected demographic columns
+                            demo_cols = [c for c in df_raw.columns if any(k in str(c).lower() for k in ['state', 'region', 'gender', 'sex', 'sample', 'id', 'native'])]
+                            cols_to_keep = [c for c in df_raw.columns if c in final_mapping or c in demo_cols]
+                            if not cols_to_keep:
+                                cols_to_keep = list(df_raw.columns)
+                            filtered_df = df_raw[cols_to_keep].copy()
 
                                 for m_col, m_info in mapped_marker_dict.items():
                                     if m_col in filtered_df.columns:

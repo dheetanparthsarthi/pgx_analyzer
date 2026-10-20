@@ -124,11 +124,18 @@ class DemographicStratifier:
             overall_pgx_summary = {'diplotypes': {}, 'phenotypes': {}, 'total_samples': len(data), 'valid_pharmacogenomic_samples': 0}
         
         # Ensure State_Clean and Gender_Clean exist for sub-group stratification
-        if 'State_Clean' not in data_processed.columns:
-            state_candidates = ['State', 'State / Country', 'State/Country', 'state']
+        if 'State_Clean' not in data_processed.columns or data_processed['State_Clean'].replace('', np.nan).dropna().empty:
+            state_candidates = ['State', 'State_Clean', 'State / Country', 'State/Country', 'state', 'Region', 'region', 'Native_Place', 'Native_Place_Clean', 'native place', 'location', 'Location']
             s_col = next((c for c in state_candidates if c in data_processed.columns), None)
+            if not s_col:
+                # Fallback: any column with 'state' or 'region' in header
+                for c in data_processed.columns:
+                    c_low = str(c).lower().replace(' ', '').replace('_', '')
+                    if 'state' in c_low or 'region' in c_low or 'native' in c_low:
+                        s_col = c
+                        break
             if s_col:
-                data_processed['State_Clean'] = data_processed[s_col].apply(lambda x: re.sub(r'[\s\u00a0]+', ' ', str(x)).strip() if pd.notna(x) and str(x).strip() not in ('', 'nan', 'Null', 'None') else '')
+                data_processed['State_Clean'] = data_processed[s_col].apply(lambda x: re.sub(r'[\s\u00a0]+', ' ', str(x)).strip() if pd.notna(x) and str(x).strip() not in ('', 'nan', 'Null', 'None', 'None', 'NaN') else '')
             else:
                 data_processed['State_Clean'] = ''
 
