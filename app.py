@@ -23,6 +23,7 @@ import plotly.graph_objects as go
 import os
 import io
 import re
+import base64
 from collections import Counter
 from scipy import stats
 import pickle
