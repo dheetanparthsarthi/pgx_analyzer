@@ -870,7 +870,9 @@ def serialize_rules(rules_dict):
     return tuple(serialized)
 
 snp_rules_items = serialize_rules(st.session_state.get('custom_snp_rules', {}))
-clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items, active_gene=st.session_state.get('selected_gene'))
+df_cols_detected = detect_genes_in_columns(list(df_raw.columns)) if df_raw is not None and not df_raw.empty else []
+active_gene_to_run = st.session_state.get('selected_gene') or (df_cols_detected[0] if df_cols_detected else 'CYP2C19')
+clean_df, qc_report, full_results = run_fast_pipeline(df_raw, mapped_tuple, snp_rules_items, active_gene=active_gene_to_run)
 processed_df = full_results.get('processed_dataframe', pd.DataFrame())
 
 # Helper to check active dataset state
@@ -1459,8 +1461,17 @@ def render_unified_results(full_results: dict, qc_report: dict):
             sel_ds_name = st.selectbox("📊 Select Active Dataset Profile to View:", ds_list, index=idx_cur, key="sel_multi_ds_switcher")
             if sel_ds_name and st.session_state.get('active_ds_name') != sel_ds_name:
                 st.session_state['active_ds_name'] = sel_ds_name
-                st.session_state['uploaded_df'] = st.session_state['datasets_dict'][sel_ds_name]
-                save_active_dataset(st.session_state['uploaded_df'])
+                new_active_df = st.session_state['datasets_dict'][sel_ds_name]
+                st.session_state['uploaded_df'] = new_active_df
+                # Dynamically synchronize target gene to match the switched dataset
+                ds_detected_genes = detect_genes_in_columns(list(new_active_df.columns))
+                if ds_detected_genes:
+                    target_g_switched = ds_detected_genes[0]
+                    st.session_state['selected_gene'] = target_g_switched
+                    all_g_m = get_default_markers_for_gene(target_g_switched, catalog_df=load_marker_catalog())
+                    matched_m = [m for m in all_g_m if find_best_column_match(m, m.split(' ')[0], target_g_switched, list(new_active_df.columns))]
+                    st.session_state['selected_markers'] = matched_m if matched_m else all_g_m
+                save_active_dataset(new_active_df)
                 save_active_session()
                 st.rerun()
         with c_ds2:
@@ -1469,7 +1480,10 @@ def render_unified_results(full_results: dict, qc_report: dict):
             st.info(f"Viewing: **{sel_ds_name}** ({len(active_df_preview):,} samples, {len(active_df_preview.columns)} columns)")
         st.divider()
 
-    active_gene = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
+    # Dynamic target gene detection: prioritized by selected_gene, then dataset headers, then full_results
+    cur_uploaded = st.session_state.get('uploaded_df')
+    detected_cols_gene = detect_genes_in_columns(list(cur_uploaded.columns)) if cur_uploaded is not None and not cur_uploaded.empty else []
+    active_gene = st.session_state.get('selected_gene') or (detected_cols_gene[0] if detected_cols_gene else None) or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
     active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG, **st.session_state.get('custom_snp_rules', {})}
     ov = full_results['overall']
     active_markers = list(ov.get('snps', {}).keys())
