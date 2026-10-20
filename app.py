@@ -321,10 +321,11 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # -----------------------------------------------------------------------------
 DELETED_FLAG_FILE = ".data_deleted.flag"
 ACTIVE_DATASET_CACHE = ".active_dataset.pkl"
+ACTIVE_DATASETS_CACHE = ".active_datasets_dict.pkl"
 ACTIVE_SESSION_CACHE = ".active_session_state.pkl"
 
 def save_active_session():
-    """Saves workflow state and gene/marker selections to disk so they survive page refreshes."""
+    """Saves workflow state, gene/marker selections, and dataset dictionary to disk so they survive page refreshes."""
     if st.session_state.get('is_deleted', False):
         return
     up_df = st.session_state.get('uploaded_df')
@@ -350,6 +351,15 @@ def save_active_session():
     except Exception:
         pass
 
+    # Save all datasets in datasets_dict so multi-dataset profiles survive refresh
+    d_dict = st.session_state.get('datasets_dict', {})
+    if d_dict and any(isinstance(df, pd.DataFrame) and not df.empty for df in d_dict.values()):
+        try:
+            with open(ACTIVE_DATASETS_CACHE, 'wb') as f:
+                pickle.dump(d_dict, f)
+        except Exception:
+            pass
+
 def load_persisted_session():
     """Restores saved workflow step, gene, and mappings on page reload/refresh."""
     if os.path.exists(ACTIVE_SESSION_CACHE) and not st.session_state.get('is_deleted', False):
@@ -367,12 +377,17 @@ def load_persisted_session():
             pass
 
 def save_active_dataset(df: pd.DataFrame):
-    """Saves active dataset to disk so it persists across page reloads and browser refreshes."""
+    """Saves active dataset and all datasets in dictionary to disk so they persist across page reloads and browser refreshes."""
     if df is not None and len(df) > 0:
         try:
             df.to_pickle(ACTIVE_DATASET_CACHE)
         except Exception:
             pass
+    # Keep datasets_dict updated
+    d_dict = st.session_state.setdefault('datasets_dict', {})
+    active_name = st.session_state.get('active_ds_name', 'Active Dataset')
+    if df is not None and len(df) > 0:
+        d_dict[active_name] = df
     save_active_session()
 
 def load_persisted_dataset() -> pd.DataFrame:
@@ -384,9 +399,21 @@ def load_persisted_dataset() -> pd.DataFrame:
             pass
     return None
 
+def load_persisted_datasets_dict() -> dict:
+    """Loads multiple datasets dictionary from disk cache file if present."""
+    if os.path.exists(ACTIVE_DATASETS_CACHE):
+        try:
+            with open(ACTIVE_DATASETS_CACHE, 'rb') as f:
+                d = pickle.load(f)
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    return {}
+
 def clear_active_dataset_cache():
     """Removes persistent dataset and session cache files."""
-    for fn in [ACTIVE_DATASET_CACHE, ACTIVE_SESSION_CACHE]:
+    for fn in [ACTIVE_DATASET_CACHE, ACTIVE_DATASETS_CACHE, ACTIVE_SESSION_CACHE]:
         if os.path.exists(fn):
             try:
                 os.remove(fn)
@@ -443,13 +470,24 @@ if 'mapped_marker_details' not in st.session_state:
 
 EMPTY_COLS = []
 
-# Auto-restore active dataset & session state from disk cache if session state was cleared by a page reload/refresh
+# Auto-restore active dataset, multi-dataset profiles & session state from disk cache upon page reload/refresh
 if not st.session_state.get('is_deleted', False):
-    if st.session_state.get('uploaded_df') is None or len(st.session_state['uploaded_df']) == 0:
+    persisted_dict = load_persisted_datasets_dict()
+    if persisted_dict:
+        st.session_state['datasets_dict'] = persisted_dict
+
+    load_persisted_session()
+
+    cur_ds_name = st.session_state.get('active_ds_name')
+    if cur_ds_name and cur_ds_name in st.session_state.get('datasets_dict', {}):
+        st.session_state['uploaded_df'] = st.session_state['datasets_dict'][cur_ds_name]
+    elif st.session_state.get('uploaded_df') is None or len(st.session_state['uploaded_df']) == 0:
         persisted_df = load_persisted_dataset()
         if persisted_df is not None and len(persisted_df) > 0:
             st.session_state['uploaded_df'] = persisted_df
-    load_persisted_session()
+            if not st.session_state.get('datasets_dict'):
+                st.session_state['datasets_dict'] = {'Active Dataset': persisted_df}
+                st.session_state['active_ds_name'] = 'Active Dataset'
 
 if st.session_state.get('uploaded_df') is None:
     st.session_state['uploaded_df'] = pd.DataFrame()
