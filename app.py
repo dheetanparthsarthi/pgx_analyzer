@@ -35,6 +35,7 @@ except Exception:
 from core.qc import DataQCEngine
 from core.stratification import DemographicStratifier
 from core.stats import GeneticStatsEngine
+from core.pca import genotype_pca
 from database.db_manager import DatabaseManager
 from reports.report_generator import ReportGenerator
 from config import SNP_CONFIG, CYP2C9_SNP_CONFIG, PHENOTYPE_ORDER, CYP2C9_PHENOTYPE_ORDER, STATE_TO_REGION
@@ -1829,7 +1830,7 @@ def render_unified_results(full_results: dict, qc_report: dict):
                 st.info("No Chi-Square data available to plot for this cohort.")
         
         with st.expander("📖 Standard Chi-Square Distribution Cutoff Reference Table (Theoretical Distribution, df = 1)", expanded=False):
-            st.caption("ℹ️ **Theoretical Reference:** Standard statistical critical values for degrees of freedom $df = 1$. This constant mathematical reference benchmark determines whether your cohort's calculated $\chi^2$ indicates Hardy-Weinberg deviation ($\chi^2 \ge 3.841$, corresponding to $p \le 0.05$). It does not change with cohort data.")
+            st.caption("ℹ️ **Theoretical Reference:** Standard statistical critical values for degrees of freedom $df = 1$. This constant mathematical reference benchmark determines whether your cohort's calculated $\\chi^2$ indicates Hardy-Weinberg deviation ($\\chi^2 \\ge 3.841$, corresponding to $p \\le 0.05$). It does not change with cohort data.")
             chi2_ref_df = pd.DataFrame([
                 {'Significance Level (α)': '0.50 (50%)', 'Critical Cutoff Value (χ², df=1)': '0.455', 'Interpretation & Decision Rule': 'Consistent with HWE (Random variation)'},
                 {'Significance Level (α)': '0.10 (10%)', 'Critical Cutoff Value (χ², df=1)': '2.706', 'Interpretation & Decision Rule': 'Non-significant variation (In HWE)'},
@@ -1878,6 +1879,69 @@ def render_unified_results(full_results: dict, qc_report: dict):
             )
             fig_pop.update_layout(height=320, margin=dict(l=20, r=20, t=35, b=20), yaxis=dict(autorange="reversed"))
             st.plotly_chart(fig_pop, use_container_width=True)
+
+        st.markdown("### 🧬 Genotype Principal Component Analysis")
+        st.caption("PCA summarizes genetic variation across the selected markers. Missing calls are mean-imputed for this visualization only.")
+        pca_source = full_results.get('processed_dataframe', pd.DataFrame())
+        pca_markers = [marker for marker in active_markers if marker in pca_source.columns]
+        pca_scores, pca_info = genotype_pca(pca_source, pca_markers, active_snp_conf)
+        if pca_info.get('reason'):
+            st.info(pca_info['reason'])
+        elif not pca_scores.empty:
+            pca_plot_df = pca_scores.copy()
+            for metadata_col in ('Sample_ID', 'Region', 'Gender_Clean'):
+                if metadata_col in pca_source.columns:
+                    pca_plot_df[metadata_col] = pca_source[metadata_col]
+            color_col = next(
+                (col for col in ('Region', 'Gender_Clean') if col in pca_plot_df.columns and pca_plot_df[col].nunique(dropna=True) > 1),
+                None,
+            )
+            variance = pca_info['explained_variance_percent']
+            pca_plot_df['PC1'] = pca_plot_df['PC1'].astype(float)
+            pca_plot_df['PC2'] = pca_plot_df['PC2'].astype(float)
+            fig_pca_2d = px.scatter(
+                pca_plot_df,
+                x='PC1',
+                y='PC2',
+                color=color_col,
+                hover_name='Sample_ID' if 'Sample_ID' in pca_plot_df.columns else None,
+                title="Genotype PCA — PC1 vs PC2",
+                labels={
+                    'PC1': f"PC1 ({variance[0]:.1f}% variance)",
+                    'PC2': f"PC2 ({variance[1]:.1f}% variance)",
+                    'Region': 'Population Region',
+                    'Gender_Clean': 'Gender',
+                },
+                color_discrete_sequence=px.colors.qualitative.Safe,
+            )
+            fig_pca_2d.update_layout(height=430, margin=dict(l=20, r=20, t=55, b=20))
+            st.plotly_chart(fig_pca_2d, use_container_width=True)
+            if len(variance) >= 3:
+                pca_plot_df['PC3'] = pca_plot_df['PC3'].astype(float)
+                fig_pca_3d = px.scatter_3d(
+                    pca_plot_df,
+                    x='PC1',
+                    y='PC2',
+                    z='PC3',
+                    color=color_col,
+                    hover_name='Sample_ID' if 'Sample_ID' in pca_plot_df.columns else None,
+                    title="Genotype PCA — PC1, PC2, and PC3",
+                    labels={
+                        'PC1': f"PC1 ({variance[0]:.1f}% variance)",
+                        'PC2': f"PC2 ({variance[1]:.1f}% variance)",
+                        'PC3': f"PC3 ({variance[2]:.1f}% variance)",
+                        'Region': 'Population Region',
+                        'Gender_Clean': 'Gender',
+                    },
+                    color_discrete_sequence=px.colors.qualitative.Safe,
+                )
+                fig_pca_3d.update_layout(height=500, margin=dict(l=20, r=20, t=55, b=20))
+                st.plotly_chart(fig_pca_3d, use_container_width=True)
+            else:
+                st.caption("A 3D PCA view needs at least three informative components; the available data supports 2D only.")
+            st.caption(f"Markers used: {', '.join(pca_info['markers_used'])}")
+            if pca_info.get('skipped_markers'):
+                st.caption(f"Skipped markers without usable biallelic variation: {', '.join(pca_info['skipped_markers'])}")
 
     # -------------------------------------------------------------------------
     # TAB 5: CYP2C19 CALLING

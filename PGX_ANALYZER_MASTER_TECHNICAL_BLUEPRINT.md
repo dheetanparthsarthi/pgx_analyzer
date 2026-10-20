@@ -270,7 +270,7 @@ $$E_{AA} = p^2 \cdot N, \quad E_{AB} = 2pq \cdot N, \quad E_{BB} = q^2 \cdot N$$
 ### 6.3 Chi-Square ($\chi^2$) Goodness-of-Fit Test
 $$\chi^2 = \frac{(O_{AA} - E_{AA})^2}{E_{AA}} + \frac{(O_{AB} - E_{AB})^2}{E_{AB}} + \frac{(O_{BB} - E_{BB})^2}{E_{BB}}, \quad df = 1$$
 
-- **Decision Threshold:** Calculated $\chi^2 \ge 3.4$ ($p \le 0.05$) marks statistically significant departure from Hardy-Weinberg Equilibrium.
+- **Decision Threshold:** For $df=1$ and $\alpha=0.05$, calculated $\chi^2 \ge 3.841$ marks statistically significant departure from Hardy-Weinberg Equilibrium.
 
 ---
 
@@ -278,8 +278,8 @@ $$\chi^2 = \frac{(O_{AA} - E_{AA})^2}{E_{AA}} + \frac{(O_{AB} - E_{AB})^2}{E_{AB
 
 1. **📊 Executive Overview:** Displays Total Samples, Fully Valid Samples, Missing Rates, Duplicate Sample IDs, and Invalid Call Warnings.
 2. **🧬 Genotype & Allele:** Genotype and allele frequency tables and bar charts.
-3. **⚖️ Hardy-Weinberg:** Observed vs. Expected heterozygosity, Chi-Square ($\chi^2$), $df$, and $p$-values with $\chi^2 = 3.4$ threshold line.
-4. **🌐 Population Stratification:** 2D & 3D PCA scatter plots visualizing population clustering.
+3. **⚖️ Hardy-Weinberg:** Observed vs. Expected heterozygosity, Chi-Square ($\chi^2$), $df$, and $p$-values with the $\chi^2 = 3.841$ threshold line.
+4. **🌐 Population Stratification:** Subgroup size summaries plus 2D and 3D genotype PCA projections when selected data contain enough informative markers and components.
 5. **💊 CYP2C19 Calling:** CPIC metabolizer phenotype distribution matrix (PM, IM, NM, RM, UM).
 6. **🛡️ Data Quality Audit:** Missing data rates per SNP, duplicate sample logs, and invalid call logs.
 7. **🗺️ Geographic Groups:** Regional matrices for North, South, East, West, and Central India.
