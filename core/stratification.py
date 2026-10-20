@@ -186,11 +186,42 @@ class DemographicStratifier:
         else:
             active_snp_rules = {}
 
-        # Use one generic engine; gene-specific translation behavior is supplied
-        # through declarative rule data, while unknown genes remain unclassified.
+        # Use one generic engine; gene-specific interpretation is supplied as
+        # rule data. Resolve selected/catalog marker labels to the canonical
+        # marker keys used by those rules before applying the table.
         translation_rules = (custom_translation_rules or {}).get(str(active_gene).upper()) or GENE_TRANSLATION_RULES.get(str(active_gene).upper())
-        if not (custom_translation_rules or {}).get(str(active_gene).upper()):
-            translation_rules = cls._adapt_translation_rules(translation_rules, data, custom_snp_rules)
+        translation_snp_rules = dict(custom_snp_rules or {})
+        if translation_rules and not (custom_translation_rules or {}).get(str(active_gene).upper()):
+            for marker in translation_rules.get('markers', {}):
+                config = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}.get(marker, {})
+                aliases = [marker, *config.get('column_patterns', []), config.get('rsid', '')]
+                normalized_aliases = {
+                    re.sub(r'[^a-z0-9]+', '', str(alias).lower())
+                    for alias in aliases if str(alias).strip()
+                }
+
+                matching_column = next((
+                    column for column in data.columns
+                    if re.sub(r'[^a-z0-9]+', '', str(column).lower()) == re.sub(r'[^a-z0-9]+', '', marker.lower())
+                ), None)
+                if matching_column is None:
+                    matching_column = next((
+                        column for column in data.columns
+                        if any(
+                            alias in re.sub(r'[^a-z0-9]+', '', str(column).lower())
+                            for alias in normalized_aliases if len(alias) >= 5
+                        )
+                    ), None)
+
+                if matching_column is not None:
+                    if marker not in data.columns:
+                        data[marker] = data[matching_column]
+                    if matching_column in translation_snp_rules:
+                        translation_snp_rules[marker] = translation_snp_rules[matching_column]
+                    elif marker not in translation_snp_rules and config:
+                        translation_snp_rules[marker] = config
+
+            translation_rules = cls._adapt_translation_rules(translation_rules, data, translation_snp_rules)
         data_processed, overall_pgx_summary = RuleBasedPGxEngine.process_dataframe(data, translation_rules)
         
         # Ensure State_Clean and Gender_Clean exist for sub-group stratification
