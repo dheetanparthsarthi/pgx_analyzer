@@ -3661,6 +3661,9 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 def cb_clear_permitted(p_k):
                     st.session_state[p_k] = ""
 
+                def cb_normalize_allele_input(state_key):
+                    st.session_state[state_key] = str(st.session_state.get(state_key, "")).strip().upper()
+
                 def cb_automap_detected(p_k, calls_list, r_k, v_k, sel_r_k, sel_v_k):
                     st.session_state[p_k] = ", ".join(calls_list)
                     r_c, v_c = extract_alleles_from_calls(calls_list)
@@ -3844,6 +3847,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         if perm_key not in st.session_state:
                             st.session_state[perm_key] = def_permitted
 
+                        # Migrate values saved by the old dropdown + "Other" controls.
+                        if st.session_state.get(ref_key) == 'Other (Manual)':
+                            st.session_state[ref_key] = st.session_state.get(f"custom_ref_in_{idx}", "") or def_ref
+                        if st.session_state.get(var_key) in {'Other (Manual)', 'None'}:
+                            st.session_state[var_key] = st.session_state.get(f"custom_var_in_{idx}", "") or def_var
+
                         cur_marker_name = st.session_state.get(name_key, std_name)
                         if sel_col == "(Select Column)":
                             mapping_has_errors = True
@@ -3940,33 +3949,27 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                             st.button("🗑️ Remove", key=f"btn_remove_marker_{idx}", on_click=cb_remove_marker_card, args=(idx,), help=f"Remove marker from mapping")
 
-                        # Ref and Var Alleles Row
+                        # Reference and variant alleles are directly editable.
                         c2_m, c3_m = st.columns(2)
                         with c2_m:
-                            ref_choices = ['A', 'C', 'G', 'T', 'Other (Manual)']
-                            cur_ref = st.session_state.get(ref_key, def_ref)
-                            if cur_ref not in ref_choices and cur_ref != 'Other (Manual)':
-                                ref_choices.insert(0, cur_ref)
-                            ref_idx = ref_choices.index(cur_ref) if cur_ref in ref_choices else (ref_choices.index(def_ref) if def_ref in ref_choices else 0)
-                            sel_ref_choice = st.selectbox("Reference allele:", ref_choices, index=ref_idx, key=f"sel_ref_choice_{idx}", help="Reference allele")
-                            if sel_ref_choice == 'Other (Manual)':
-                                ref_val = st.text_input("Custom Ref Allele:", value=cur_ref if cur_ref != 'Other (Manual)' else '', key=f"custom_ref_in_{idx}").strip().upper()
-                            else:
-                                ref_val = sel_ref_choice
-                            st.session_state[ref_key] = ref_val
+                            ref_val = st.text_input(
+                                "Reference allele:",
+                                key=ref_key,
+                                max_chars=16,
+                                on_change=cb_normalize_allele_input,
+                                args=(ref_key,),
+                                help="Enter the reference allele for this marker, for example A, C, G, T, DEL, or INS.",
+                            ).strip().upper()
 
                         with c3_m:
-                            var_choices = ['A', 'C', 'G', 'T', 'None', 'Other (Manual)']
-                            cur_var = st.session_state.get(var_key, def_var)
-                            if cur_var not in var_choices and cur_var != 'Other (Manual)':
-                                var_choices.insert(0, cur_var)
-                            var_idx = var_choices.index(cur_var) if cur_var in var_choices else (var_choices.index(def_var) if def_var in var_choices else 0)
-                            sel_var_choice = st.selectbox("Variant allele:", var_choices, index=var_idx, key=f"sel_var_choice_{idx}", help="Variant allele")
-                            if sel_var_choice == 'Other (Manual)':
-                                var_val = st.text_input("Custom Var Allele:", value=cur_var if cur_var != 'Other (Manual)' else '', key=f"custom_var_in_{idx}").strip().upper()
-                            else:
-                                var_val = sel_var_choice
-                            st.session_state[var_key] = var_val
+                            var_val = st.text_input(
+                                "Variant allele:",
+                                key=var_key,
+                                max_chars=16,
+                                on_change=cb_normalize_allele_input,
+                                args=(var_key,),
+                                help="Enter the variant allele for this marker, for example A, C, G, T, DEL, or INS.",
+                            ).strip().upper()
 
                         # Permitted Genotypes Input Row
                         c_perm_in, c_perm_info = st.columns([1.6, 1.4])
@@ -4110,7 +4113,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         ref_mismatch = bool(ref_val and ref_val not in perm_chars) if raw_perm_list else False
                         var_mismatch = bool(var_val and var_val != 'None' and var_val not in perm_chars) if raw_perm_list else False
 
-                        identical_alleles = bool(ref_val == var_val and ref_val != '' and var_val != 'None')
+                        missing_allele_definition = not ref_val or not var_val
+                        if missing_allele_definition:
+                            st.error("⛔ Enter both a reference allele and a variant allele for this marker.")
+                            mapping_has_errors = True
+
+                        identical_alleles = bool(ref_val == var_val and ref_val != '')
                         if identical_alleles:
                             mapping_has_errors = True
 
