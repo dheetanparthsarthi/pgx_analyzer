@@ -4578,42 +4578,77 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             st.markdown("### Export")
             st.caption("Download the full result set for the current group selection.")
 
-            e1, e2, e3, e_remap, e_retarget = st.columns([0.22, 0.22, 0.22, 0.17, 0.17])
+            e_prev, e1, e2, e3, e_remap, e_retarget = st.columns([0.18, 0.18, 0.18, 0.18, 0.14, 0.14])
 
             rep_gen = ReportGenerator(full_results, qc_report) if has_active_data() else None
+
+            pdf_bytes = None
+            if rep_gen:
+                try:
+                    pdf_bytes = rep_gen.generate_pdf()
+                except Exception as ex:
+                    logger.warning("Error generating PDF preview bytes: %s", ex)
+
+            with e_prev:
+                if pdf_bytes:
+                    preview_label = "👁️ Hide Preview" if st.session_state.get('show_pdf_preview', False) else "👁️ Preview PDF"
+                    if st.button(preview_label, use_container_width=True, key="btn_toggle_pdf_prev"):
+                        st.session_state['show_pdf_preview'] = not st.session_state.get('show_pdf_preview', False)
+                        st.rerun()
+                else:
+                    st.button("👁️ Preview PDF", disabled=True, use_container_width=True)
 
             with e1:
                 if rep_gen:
                     excel_bytes = rep_gen.generate_excel()
-                    st.download_button("⬇ Excel (.xlsx, all sheets)", data=excel_bytes, file_name="PGx_Population_Report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="btn_exp_excel")
+                    st.download_button("⬇ Excel (.xlsx)", data=excel_bytes, file_name=f"{active_gene}_Population_Report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key="btn_exp_excel")
                 else:
-                    st.button("⬇ Excel (.xlsx, all sheets)", disabled=True, use_container_width=True)
+                    st.button("⬇ Excel (.xlsx)", disabled=True, use_container_width=True)
 
             with e2:
                 if rep_gen:
                     csv_bytes = rep_gen.generate_csv()
-                    st.download_button("⬇ CSV (summary)", data=csv_bytes, file_name="PGx_Population_Summary.csv", mime="text/csv", use_container_width=True, key="btn_exp_csv")
+                    st.download_button("⬇ CSV (summary)", data=csv_bytes, file_name=f"{active_gene}_Population_Summary.csv", mime="text/csv", use_container_width=True, key="btn_exp_csv")
                 else:
                     st.button("⬇ CSV (summary)", disabled=True, use_container_width=True)
 
             with e3:
-                if rep_gen:
-                    pdf_bytes = rep_gen.generate_pdf()
-                    st.download_button("⬇ PDF (print view)", data=pdf_bytes, file_name="PGx_Population_Report.pdf", mime="application/pdf", use_container_width=True, key="btn_exp_pdf")
+                if pdf_bytes:
+                    st.download_button("⬇ PDF Report", data=pdf_bytes, file_name=f"{active_gene}_Population_Report.pdf", mime="application/pdf", use_container_width=True, key="btn_exp_pdf")
                 else:
-                    st.button("⬇ PDF (print view)", disabled=True, use_container_width=True)
+                    st.button("⬇ PDF Report", disabled=True, use_container_width=True)
 
             with e_remap:
-                if st.button("← Re-map columns", use_container_width=True, key="btn_res_remap"):
+                if st.button("← Re-map", use_container_width=True, key="btn_res_remap"):
                     st.session_state['workflow_step'] = '3 · Map columns'
                     save_active_session()
                     st.rerun()
 
             with e_retarget:
-                if st.button("🎯 Change Target Gene", use_container_width=True, key="btn_res_retarget", help="Switch target gene or select different biomarkers"):
+                if st.button("🎯 Target", use_container_width=True, key="btn_res_retarget", help="Switch target gene or select different biomarkers"):
                     st.session_state['workflow_step'] = '1 · Select Target'
                     save_active_session()
                     st.rerun()
+
+            # Render Inline Interactive PDF Preview if toggled
+            if st.session_state.get('show_pdf_preview', False) and pdf_bytes:
+                st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+                with st.expander(f"📑 Live Document Preview: {active_gene} Population Report", expanded=True):
+                    p_col1, p_col2 = st.columns([0.8, 0.2])
+                    with p_col1:
+                        st.caption("Inspect formatted tables, HWE statistics, allele distributions, and CPIC phenotype summaries before downloading.")
+                    with p_col2:
+                        st.download_button("📥 Download PDF Directly", data=pdf_bytes, file_name=f"{active_gene}_Population_Report.pdf", mime="application/pdf", use_container_width=True, key="btn_prev_dl_pdf")
+
+                    b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+                    pdf_iframe = (
+                        f'<iframe src="data:application/pdf;base64,{b64_pdf}" '
+                        f'width="100%" height="820" type="application/pdf" '
+                        f'style="border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">'
+                        f'Your browser does not support embedded PDF preview. Please download the PDF above.'
+                        f'</iframe>'
+                    )
+                    st.markdown(pdf_iframe, unsafe_allow_html=True)
 
             if df_raw is not None and not df_raw.empty:
                 st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
