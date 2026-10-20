@@ -14,6 +14,13 @@ from config import SNP_CONFIG, CYP2C9_SNP_CONFIG, ALPHA_SIGNIFICANCE
 
 class GeneticStatsEngine:
     @staticmethod
+    def _normalize_genotype_call(value: Any) -> str:
+        """Normalize a diploid call without assuming alleles are one character."""
+        if pd.isna(value):
+            return ""
+        return str(value).strip().upper().replace("/", "").replace("|", "").replace(" ", "")
+
+    @staticmethod
     def exact_hwe_pvalue(n_AA: int, n_Aa: int, n_aa: int) -> float:
         """
         Calculates Haldane / Wigginton Exact HWE P-value for biallelic SNPs.
@@ -22,7 +29,7 @@ class GeneticStatsEngine:
         n = n_AA + n_Aa + n_aa
         if n == 0:
             return 1.0
-        
+
         n_A = 2 * n_AA + n_Aa
         n_a = 2 * n_aa + n_Aa
         
@@ -59,9 +66,8 @@ class GeneticStatsEngine:
         Performs full Genotype, Allele, and HWE analysis for a single SNP column.
         Supports configured and generic/custom biallelic markers.
         """
-        clean_series = series.dropna().astype(str).str.strip().str.upper()
-        clean_series = clean_series[~clean_series.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'])]
-        n_valid = len(clean_series)
+        clean_series = series.dropna().map(cls._normalize_genotype_call)
+        clean_series = clean_series[~clean_series.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN', 'NOTPERFORMED'])]
         
         all_configs = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
         snp_info = custom_info or all_configs.get(snp_name, None)
@@ -69,8 +75,7 @@ class GeneticStatsEngine:
         if not snp_info:
             # Dynamically infer alleles if not pre-configured
             counts = clean_series.value_counts()
-            alleles = set("".join(counts.index.tolist()))
-            alleles = [a for a in alleles if a.isalpha()]
+            alleles = sorted({a for call in counts.index.tolist() if len(call) == 2 for a in call if a.isalpha()})
             ref = alleles[0] if len(alleles) > 0 else 'A'
             var = alleles[1] if len(alleles) > 1 else 'G'
             snp_info = {
@@ -85,15 +90,27 @@ class GeneticStatsEngine:
         var_allele = snp_info.get('var_allele')
         if not ref_allele or not var_allele:
             counts = clean_series.value_counts()
-            alleles = set("".join(counts.index.tolist()))
-            alleles = [a for a in alleles if a.isalpha()]
+            alleles = sorted({a for call in counts.index.tolist() if len(call) == 2 for a in call if a.isalpha()})
             ref_allele = ref_allele or (alleles[0] if len(alleles) > 0 else 'A')
             var_allele = var_allele or (alleles[1] if len(alleles) > 1 else 'G')
 
-        wt_gen = snp_info.get('wildtype_genotype') or f"{ref_allele}{ref_allele}"
-        het_gen = snp_info.get('het_genotype') or f"{ref_allele}{var_allele}"
-        var_gen = snp_info.get('hom_var_genotype') or f"{var_allele}{var_allele}"
-        
+        ref_allele = str(ref_allele).strip().upper()
+        var_allele = str(var_allele).strip().upper()
+        wt_gen = cls._normalize_genotype_call(snp_info.get('wildtype_genotype') or f"{ref_allele}{ref_allele}")
+        het_gen = cls._normalize_genotype_call(snp_info.get('het_genotype') or f"{ref_allele}{var_allele}")
+        var_gen = cls._normalize_genotype_call(snp_info.get('hom_var_genotype') or f"{var_allele}{var_allele}")
+
+        ref_calls = {cls._normalize_genotype_call(f"{ref_allele}{ref_allele}"), wt_gen}
+        het_calls = {cls._normalize_genotype_call(f"{ref_allele}{var_allele}"), cls._normalize_genotype_call(f"{var_allele}{ref_allele}"), het_gen}
+        var_calls = {cls._normalize_genotype_call(f"{var_allele}{var_allele}"), var_gen}
+
+        # Count only calls that match the configured biallelic genotype pairs.
+        # This supports multi-character allele labels such as DEL and INS.
+        call_counts = clean_series.value_counts()
+        c_wt = int(sum(call_counts.get(call, 0) for call in ref_calls))
+        c_het = int(sum(call_counts.get(call, 0) for call in (het_calls - ref_calls - var_calls)))
+        c_var = int(sum(call_counts.get(call, 0) for call in (var_calls - ref_calls)))
+        n_valid = c_wt + c_het + c_var
         if n_valid == 0:
             return {
                 'snp_name': snp_name,
@@ -114,11 +131,6 @@ class GeneticStatsEngine:
                     'interpretation': 'No Data'
                 }
             }
-
-        # 1. Genotype Counts
-        c_wt = int((clean_series == wt_gen).sum())
-        c_het = int((clean_series == het_gen).sum() + (clean_series == het_gen[::-1]).sum() if het_gen != het_gen[::-1] else (clean_series == het_gen).sum())
-        c_var = int((clean_series == var_gen).sum())
         
         f_wt = c_wt / n_valid
         f_het = c_het / n_valid

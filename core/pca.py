@@ -54,12 +54,22 @@ def genotype_pca(
             skipped.append(marker)
             continue
 
+        possible_dosages: Dict[str, set[int]] = {}
+        for genotype, value in (
+            (f"{ref}{ref}", 0),
+            (f"{ref}{var}", 1),
+            (f"{var}{ref}", 1),
+            (f"{var}{var}", 2),
+        ):
+            possible_dosages.setdefault(genotype, set()).add(value)
+
         dosage = []
         for call in calls:
-            if call is None or len(call) != 2 or any(base not in {ref, var} for base in call):
+            choices = possible_dosages.get(call or "", set())
+            if len(choices) != 1:
                 dosage.append(np.nan)
             else:
-                dosage.append(float(call.count(var)))
+                dosage.append(float(next(iter(choices))))
         series = pd.Series(dosage, index=dataframe.index, dtype=float)
         if series.notna().sum() < 2 or series.dropna().nunique() < 2:
             skipped.append(marker)

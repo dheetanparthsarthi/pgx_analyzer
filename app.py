@@ -3553,15 +3553,22 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                 # Define helper functions and callbacks for flexible marker mapping
                 def extract_alleles_from_calls(calls):
+                    # Only infer alleles automatically for ordinary two-character,
+                    # single-base calls. Multi-character labels (e.g. DEL/INS) and
+                    # numeric calls require the user to enter the actual alleles.
+                    normalized_calls = [
+                        str(call).replace('/', '').replace('|', '').replace(' ', '').upper()
+                        for call in calls
+                    ]
+                    if not normalized_calls or any(len(call) != 2 or not call.isalpha() for call in normalized_calls):
+                        return '', ''
                     al_counts = Counter()
-                    for call in calls:
-                        clean_c = str(call).replace('/', '').replace('|', '').replace(' ', '').upper()
-                        for ch in clean_c:
-                            if ch.isalpha():
-                                al_counts[ch] += 1
+                    for call in normalized_calls:
+                        for allele in call:
+                            al_counts[allele] += 1
                     most = [al for al, _ in al_counts.most_common()]
                     r = most[0] if len(most) > 0 else 'A'
-                    v = most[1] if len(most) > 1 else 'None'
+                    v = most[1] if len(most) > 1 else ''
                     return r, v
 
 
@@ -3577,7 +3584,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                     else:
                         base_name = clean_label
 
-                    auto_r, auto_v = 'A', 'G'
+                    auto_r, auto_v = '', ''
                     if detected_calls and len(detected_calls) > 0:
                         cand_r, cand_v = extract_alleles_from_calls(detected_calls)
                         if cand_r:
