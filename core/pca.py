@@ -91,7 +91,9 @@ def genotype_pca(
             "skipped_markers": skipped,
         }
 
-    centered = matrix.to_numpy(dtype=float)
+    # pandas may expose a read-only view here (notably with newer pandas / CoW
+    # settings). Centering is in-place, so request an independent writable array.
+    centered = matrix.to_numpy(dtype=float, copy=True)
     centered -= centered.mean(axis=0, keepdims=True)
     allele_freq = matrix.mean(axis=0).to_numpy(dtype=float) / 2.0
     expected_sd = np.sqrt(2.0 * allele_freq * (1.0 - allele_freq))
