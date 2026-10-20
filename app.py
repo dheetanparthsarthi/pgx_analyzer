@@ -4531,40 +4531,40 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 cols_to_keep = list(df_raw.columns)
                             filtered_df = df_raw[cols_to_keep].copy()
 
-                                for m_col, m_info in mapped_marker_dict.items():
-                                    if m_col in filtered_df.columns:
-                                        user_permitted = m_info.get('permitted_genotypes', [])
-                                        if user_permitted:
-                                            valid_set = {str(g).strip().upper().replace('/', '').replace('|', '').replace(' ', '') for g in user_permitted if str(g).strip()}
-                                            augmented = set(valid_set)
-                                            for g in valid_set:
-                                                if len(g) == 2:
-                                                    augmented.add(g[1] + g[0])
-                                            def clean_user_calls(v):
-                                                if pd.isna(v): return np.nan
-                                                clean = str(v).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
-                                                if clean in valid_set: return clean
-                                                if clean in augmented:
-                                                    rev = clean[1] + clean[0] if len(clean) == 2 else clean
-                                                    if rev in valid_set: return rev
-                                                    return clean
-                                                return np.nan
-                                            filtered_df[m_col] = filtered_df[m_col].apply(clean_user_calls)
-                                        else:
-                                            r_a = m_info['ref_allele']
-                                            v_a = m_info['var_allele']
-                                            valid_dyn = {r_a + r_a, r_a + v_a, v_a + r_a, v_a + v_a}
-                                            def clean_dyn(v):
-                                                if pd.isna(v): return np.nan
-                                                clean = str(v).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
-                                                if clean in valid_dyn: return clean
-                                                return np.nan
-                                            filtered_df[m_col] = filtered_df[m_col].apply(clean_dyn)
+                            for m_col, m_info in mapped_marker_dict.items():
+                                if m_col in filtered_df.columns:
+                                    user_permitted = m_info.get('permitted_genotypes', [])
+                                    if user_permitted:
+                                        valid_set = {str(g).strip().upper().replace('/', '').replace('|', '').replace(' ', '') for g in user_permitted if str(g).strip()}
+                                        augmented = set(valid_set)
+                                        for g in valid_set:
+                                            if len(g) == 2:
+                                                augmented.add(g[1] + g[0])
+                                        def clean_user_calls(v):
+                                            if pd.isna(v): return np.nan
+                                            clean = str(v).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
+                                            if clean in valid_set: return clean
+                                            if clean in augmented:
+                                                rev = clean[1] + clean[0] if len(clean) == 2 else clean
+                                                if rev in valid_set: return rev
+                                                return clean
+                                            return np.nan
+                                        filtered_df[m_col] = filtered_df[m_col].apply(clean_user_calls)
+                                    else:
+                                        r_a = m_info['ref_allele']
+                                        v_a = m_info['var_allele']
+                                        valid_dyn = {r_a + r_a, r_a + v_a, v_a + r_a, v_a + v_a}
+                                        def clean_dyn(v):
+                                            if pd.isna(v): return np.nan
+                                            clean = str(v).strip().upper().replace('/', '').replace('|', '').replace(' ', '')
+                                            if clean in valid_dyn: return clean
+                                            return np.nan
+                                        filtered_df[m_col] = filtered_df[m_col].apply(clean_dyn)
 
-                                st.session_state['uploaded_df'] = filtered_df
-                                cur_ds_name = st.session_state.get('active_ds_name', 'Active Dataset')
-                                st.session_state.setdefault('datasets_dict', {})[cur_ds_name] = filtered_df
-                                save_active_dataset(filtered_df)
+                            st.session_state['uploaded_df'] = filtered_df
+                            cur_ds_name = st.session_state.get('active_ds_name', 'Active Dataset')
+                            st.session_state.setdefault('datasets_dict', {})[cur_ds_name] = filtered_df
+                            save_active_dataset(filtered_df)
 
                         st.session_state['workflow_step'] = '4 · Results'
                         save_active_session()
