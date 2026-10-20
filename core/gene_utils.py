@@ -112,3 +112,85 @@ def find_best_column_match(marker_label: str, std_name: str, sel_gene: str, cols
                     return c
 
     return ""
+
+def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame, active_gene: Optional[str] = None) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Intelligently aligns gene, marker, and demographic columns between base_df and new_df:
+    - Demographic columns (Sample_ID, Gender, State, DOB) are aligned.
+    - If datasets share the same target gene:
+        - Common markers are merged into the same column.
+        - Markers unique to new_df are preserved as separate distinct columns (outer merge).
+    - If datasets belong to completely different genes (e.g. CYP2C9 vs CYP2C19),
+      returns an advisory error log explaining that merging different genes is blocked.
+    """
+    if base_df is None or base_df.empty:
+        return new_df.copy() if new_df is not None else pd.DataFrame(), ["Base dataset empty; adopted newly uploaded dataset."]
+    if new_df is None or new_df.empty:
+        return base_df.copy(), ["New dataset empty; retained current base dataset."]
+
+    base_genes = detect_genes_in_columns(list(base_df.columns))
+    new_genes = detect_genes_in_columns(list(new_df.columns))
+
+    # Verify gene compatibility
+    if base_genes and new_genes:
+        shared_genes = [g for g in new_genes if any(g.upper() == bg.upper() for bg in base_genes)]
+        if not shared_genes and (not active_gene or (active_gene.upper() not in [g.upper() for g in new_genes])):
+            err_msg = f"⛔ Cannot merge: Base dataset represents **{', '.join(base_genes)}** but newly uploaded dataset represents **{', '.join(new_genes)}**. Merging is only permitted when datasets share the same gene. Please keep them as separate datasets."
+            return base_df.copy(), [err_msg]
+
+    new_aligned = new_df.copy()
+    alignment_log = []
+    rename_dict = {}
+
+    # Helper for demographic matching
+    demo_patterns = {
+        'Sample_ID': ['sample id', 'sample_id', 'sample', 'patient id', 'patient_id', 'lab id', 'id'],
+        'Gender': ['gender', 'sex'],
+        'State': ['state / country', 'state/country', 'state', 'region', 'native place', 'native', 'location'],
+        'DOB': ['date of birth', 'dob', 'birth']
+    }
+
+    def _find_demo_col(key: str, df: pd.DataFrame) -> Optional[str]:
+        p_list = demo_patterns.get(key, [])
+        for p in p_list:
+            for c in df.columns:
+                c_clean = str(c).lower().replace(" ", "").replace("_", "").replace("-", "")
+                p_clean = p.lower().replace(" ", "").replace("_", "").replace("-", "")
+                if p_clean in c_clean:
+                    return c
+        return None
+
+    # 1. Align core metadata fields
+    for demo_key in ['Sample_ID', 'Gender', 'State', 'DOB']:
+        b_col = _find_demo_col(demo_key, base_df)
+        n_col = _find_demo_col(demo_key, new_aligned)
+        if b_col and n_col and b_col != n_col:
+            rename_dict[n_col] = b_col
+            alignment_log.append(f"📋 **{demo_key}**: Aligned new column `{n_col}` ➔ existing `{b_col}`")
+        elif b_col and n_col and b_col == n_col:
+            alignment_log.append(f"✅ **{demo_key}**: Identical column `{b_col}` matched")
+
+    # 2. Check each marker column in new dataset against base dataset
+    b_cols = list(base_df.columns)
+    n_cols = list(new_df.columns)
+
+    for n_c in n_cols:
+        if n_c in rename_dict:
+            continue
+        g_cand = get_column_gene(n_c) or active_gene or ""
+        b_match = find_best_column_match(n_c, n_c.split(' ')[0], g_cand, b_cols)
+        if b_match and b_match != n_c:
+            rename_dict[n_c] = b_match
+            alignment_log.append(f"🧬 **Same Marker**: Aligned `{n_c}` ➔ `{b_match}` (merged into same column)")
+        elif b_match and b_match == n_c:
+            alignment_log.append(f"✅ **Same Marker**: Identical column `{n_c}` matched")
+        else:
+            # Different marker: will create separate column in merged DataFrame!
+            alignment_log.append(f"➕ **Distinct Marker**: `{n_c}` added as a separate column")
+
+    if rename_dict:
+        new_aligned = new_aligned.rename(columns=rename_dict)
+
+    merged_df = pd.concat([base_df, new_aligned], ignore_index=True)
+    return merged_df, alignment_log
+

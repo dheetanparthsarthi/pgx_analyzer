@@ -620,7 +620,7 @@ def find_matching_gene_column(target_key: str, df: pd.DataFrame) -> str:
             return c
     return None
 
-from core.gene_utils import KNOWN_PGX_GENES, get_column_gene, detect_genes_in_columns, get_default_markers_for_gene, find_best_column_match
+from core.gene_utils import KNOWN_PGX_GENES, get_column_gene, detect_genes_in_columns, get_default_markers_for_gene, find_best_column_match, smart_merge_datasets
 
 def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: pd.DataFrame = None):
     """Sets active target gene and its markers across session state and synchronizes all widget keys."""
@@ -652,33 +652,67 @@ def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: p
 
 def smart_merge_datasets(base_df: pd.DataFrame, new_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
-    Intelligently aligns gene and demographic columns between base_df and new_df
-    before concatenating to ensure genotypes merge into the exact correct gene columns.
+    Intelligently aligns gene, marker, and demographic columns between base_df and new_df:
+    - Demographic columns (Sample_ID, Gender, State, DOB) are aligned.
+    - If datasets share the same target gene:
+        - Common markers are merged into the same column.
+        - Markers unique to new_df are preserved as separate distinct columns (outer merge).
+    - If datasets belong to completely different genes (e.g. CYP2C9 vs CYP2C19),
+      returns an advisory error log explaining that merging different genes is blocked.
     """
     if base_df is None or base_df.empty:
         return new_df.copy(), ["Base dataset empty; adopted newly uploaded dataset."]
     if new_df is None or new_df.empty:
         return base_df.copy(), ["New dataset empty; retained current base dataset."]
 
+    base_genes = detect_genes_in_columns(list(base_df.columns))
+    new_genes = detect_genes_in_columns(list(new_df.columns))
+    active_g = st.session_state.get('selected_gene')
+
+    # Verify gene compatibility
+    if base_genes and new_genes:
+        shared_genes = [g for g in new_genes if any(g.upper() == bg.upper() for bg in base_genes)]
+        if not shared_genes and (not active_g or (active_g.upper() not in [g.upper() for g in new_genes])):
+            # Incompatible genes detected
+            err_msg = f"⛔ Cannot merge: Base dataset represents **{', '.join(base_genes)}** but newly uploaded dataset represents **{', '.join(new_genes)}**. Merging is only permitted when datasets share the same gene. Please keep them as separate datasets."
+            return base_df.copy(), [err_msg]
+
     new_aligned = new_df.copy()
     alignment_log = []
     rename_dict = {}
 
-    target_keys = ['Sample_ID', 'CYP2C19*2', 'CYP2C19*3', 'CYP2C19*17', 'Gender', 'State', 'DOB']
+    # 1. Align core metadata fields
+    for demo_key in ['Sample_ID', 'Gender', 'State', 'DOB']:
+        b_col = find_matching_gene_column(demo_key, base_df)
+        n_col = find_matching_gene_column(demo_key, new_aligned)
+        if b_col and n_col and b_col != n_col:
+            rename_dict[n_col] = b_col
+            alignment_log.append(f"📋 **{demo_key}**: Aligned new column `{n_col}` ➔ existing `{b_col}`")
+        elif b_col and n_col and b_col == n_col:
+            alignment_log.append(f"✅ **{demo_key}**: Identical column `{b_col}` matched")
 
-    for key in target_keys:
-        base_match = find_matching_gene_column(key, base_df)
-        new_match = find_matching_gene_column(key, new_aligned)
+    # 2. Check each marker column in new dataset against base dataset
+    b_cols = list(base_df.columns)
+    n_cols = list(new_df.columns)
 
-        if base_match and new_match and base_match != new_match:
-            rename_dict[new_match] = base_match
-            alignment_log.append(f"🧬 **{key}**: Aligned new column `{new_match}` ➔ existing column `{base_match}`")
-        elif base_match and new_match and base_match == new_match:
-            alignment_log.append(f"✅ **{key}**: Identical column `{base_match}` matched")
+    for n_c in n_cols:
+        if n_c in rename_dict:
+            continue
+        g_cand = get_column_gene(n_c) or active_g or ""
+        b_match = find_best_column_match(n_c, n_c.split(' ')[0], g_cand, b_cols)
+        if b_match and b_match != n_c:
+            rename_dict[n_c] = b_match
+            alignment_log.append(f"🧬 **Same Marker**: Aligned `{n_c}` ➔ `{b_match}` (merged into same column)")
+        elif b_match and b_match == n_c:
+            alignment_log.append(f"✅ **Same Marker**: Identical column `{n_c}` matched")
+        else:
+            # Different marker: will create separate column in merged DataFrame!
+            alignment_log.append(f"➕ **Distinct Marker**: `{n_c}` added as a separate column")
 
     if rename_dict:
         new_aligned = new_aligned.rename(columns=rename_dict)
 
+    # Outer concatenation preserves common columns and adds separate columns for distinct markers
     merged_df = pd.concat([base_df, new_aligned], ignore_index=True)
     return merged_df, alignment_log
 
@@ -1371,13 +1405,30 @@ def render_unified_results(full_results: dict, qc_report: dict):
         return
 
     if len(st.session_state.get('datasets_dict', {})) > 1:
-        st.markdown("### 📂 Multi-Dataset Profile View")
+        st.markdown(f"""
+        <div style="background: #F8FAFC; border: 1.5px solid #3B82F6; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-weight: 700; color: #1E40AF; font-size: 14px;">📂 Multi-Dataset Profile Active ({len(st.session_state['datasets_dict'])} Datasets Uploaded)</div>
+                <div style="font-size: 12px; color: #64748B;">Select dataset from dropdown to calculate and view profile</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         ds_list = list(st.session_state['datasets_dict'].keys())
-        sel_ds_name = st.selectbox("Select Active Dataset Profile for Separate Calculation:", ds_list, key="sel_multi_ds_switcher")
-        if sel_ds_name and st.session_state.get('active_ds_name') != sel_ds_name:
-            st.session_state['active_ds_name'] = sel_ds_name
-            st.session_state['uploaded_df'] = st.session_state['datasets_dict'][sel_ds_name]
-            st.rerun()
+        active_current = st.session_state.get('active_ds_name', ds_list[0])
+        idx_cur = ds_list.index(active_current) if active_current in ds_list else 0
+        c_ds1, c_ds2 = st.columns([1.5, 1.5])
+        with c_ds1:
+            sel_ds_name = st.selectbox("📊 Select Active Dataset Profile to View:", ds_list, index=idx_cur, key="sel_multi_ds_switcher")
+            if sel_ds_name and st.session_state.get('active_ds_name') != sel_ds_name:
+                st.session_state['active_ds_name'] = sel_ds_name
+                st.session_state['uploaded_df'] = st.session_state['datasets_dict'][sel_ds_name]
+                save_active_dataset(st.session_state['uploaded_df'])
+                save_active_session()
+                st.rerun()
+        with c_ds2:
+            st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+            active_df_preview = st.session_state['datasets_dict'].get(sel_ds_name, pd.DataFrame())
+            st.info(f"Viewing: **{sel_ds_name}** ({len(active_df_preview):,} samples, {len(active_df_preview.columns)} columns)")
         st.divider()
 
     active_gene = st.session_state.get('selected_gene') or full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
@@ -2763,35 +2814,43 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 'State': chk_res['state_col']
                             }
 
-                            clear_deletion_flag()
-                            st.session_state['last_uploaded_file_id'] = uploaded_file_id
-                            st.session_state['uploaded_df'] = df_load
-                            st.session_state['datasets_dict'] = {f"Active Dataset ({file_upload.name})": df_load}
-                            st.session_state['mapped_cols'] = {}
-                            st.session_state['pending_new_df'] = None
-                            st.session_state['pending_file_id'] = None
-                            st.session_state['pending_file_name'] = None
-                            save_active_dataset(df_load)
+                            if has_active_data():
+                                st.session_state['pending_new_df'] = df_load
+                                st.session_state['pending_file_id'] = uploaded_file_id
+                                st.session_state['pending_file_name'] = file_upload.name
+                                st.warning(f"⚠️ Dataset **{file_upload.name}** ({len(df_load):,} samples) uploaded! Please choose below: **Merge with Active Dataset**, **Keep as Separate Dataset**, or **Replace Active Dataset**.")
+                            else:
+                                clear_deletion_flag()
+                                st.session_state['last_uploaded_file_id'] = uploaded_file_id
+                                st.session_state['uploaded_df'] = df_load
+                                active_label = f"Dataset 1 ({file_upload.name})"
+                                st.session_state['datasets_dict'] = {active_label: df_load}
+                                st.session_state['active_ds_name'] = active_label
+                                st.session_state['mapped_cols'] = {}
+                                st.session_state['pending_new_df'] = None
+                                st.session_state['pending_file_id'] = None
+                                st.session_state['pending_file_name'] = None
+                                save_active_dataset(df_load)
 
-                            # Auto-detect target gene ONLY if user has not explicitly selected one
-                            detected_file_genes = detect_genes_in_columns(df_load.columns)
-                            curr_g = st.session_state.get('selected_gene')
-                            if not curr_g and detected_file_genes:
-                                primary_g = detected_file_genes[0]
-                                all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
-                                matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(df_load.columns))]
-                                chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
-                                set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
-                            elif curr_g:
-                                all_g_markers = get_default_markers_for_gene(curr_g, catalog_df)
-                                matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], curr_g, list(df_load.columns))]
-                                if matched_f_markers:
-                                    st.session_state['selected_markers'] = matched_f_markers
+                                # Auto-detect target gene ONLY if user has not explicitly selected one
+                                detected_file_genes = detect_genes_in_columns(df_load.columns)
+                                curr_g = st.session_state.get('selected_gene')
+                                if not curr_g and detected_file_genes:
+                                    primary_g = detected_file_genes[0]
+                                    all_g_markers = get_default_markers_for_gene(primary_g, catalog_df)
+                                    matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], primary_g, list(df_load.columns))]
+                                    chosen_markers = matched_f_markers if matched_f_markers else all_g_markers
+                                    set_active_target_gene(primary_g, markers=chosen_markers, catalog_df=catalog_df)
+                                elif curr_g:
+                                    all_g_markers = get_default_markers_for_gene(curr_g, catalog_df)
+                                    matched_f_markers = [m for m in all_g_markers if find_best_column_match(m, m.split(' ')[0], curr_g, list(df_load.columns))]
+                                    if matched_f_markers:
+                                        st.session_state['selected_markers'] = matched_f_markers
 
-                            # Seamless, instant advance to Step 3 Map columns
-                            st.session_state['workflow_step'] = '3 · Map columns'
-                            st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns). Advancing to Map Columns...")
-                            st.rerun()
+                                # Seamless advance to Step 3 Map columns for the first dataset
+                                st.session_state['workflow_step'] = '3 · Map columns'
+                                st.success(f"✅ Loaded **{file_upload.name}** ({len(df_load):,} samples, {len(df_load.columns)} columns). Advancing to Map Columns...")
+                                st.rerun()
                     except Exception as e:
                         st.error(f"Error loading file: {e}")
 
@@ -2981,49 +3040,76 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             if st.session_state.get('pending_new_df') is not None:
                 pending_df = st.session_state['pending_new_df']
                 pending_fname = st.session_state.get('pending_file_name', 'Uploaded File')
-                st.warning(f"⚠️ **An active dataset is already loaded ({len(st.session_state['uploaded_df']):,} samples).**\n\nHow would you like to process new file **{pending_fname}** ({len(pending_df):,} samples)?")
+                st.markdown(f"""
+                <div style="background: #EFF6FF; border: 2px solid #3B82F6; border-radius: 8px; padding: 14px; margin-top: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 20px;">📂</span>
+                        <div style="font-weight: 800; color: #1E40AF; font-size: 15px;">Multiple Datasets Detected in Workspace</div>
+                    </div>
+                    <div style="color: #1E3A8A; font-size: 13px; margin-top: 6px; line-height: 1.5;">
+                        You have an active dataset with <b>{len(st.session_state['uploaded_df']):,} samples</b>, and you just uploaded <b>{pending_fname}</b> ({len(pending_df):,} samples).<br>
+                        Choose how you would like to handle this data:
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 
                 c_mrg1, c_mrg2, c_mrg3 = st.columns(3)
                 with c_mrg1:
-                    if st.button("🔄 Merge with Active Dataset", type="primary", use_container_width=True, key="btn_merge_dataset"):
+                    if st.button("🔄 Merge with Active Dataset", type="primary", use_container_width=True, key="btn_merge_dataset", help="Allowed when both datasets share the same target gene"):
                         base_df = st.session_state['uploaded_df']
                         merged_df, align_log = smart_merge_datasets(base_df, pending_df)
-                        clear_deletion_flag()
-                        st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
-                        st.session_state['uploaded_df'] = merged_df
-                        st.session_state.setdefault('datasets_dict', {})['Master Merged Dataset'] = merged_df
-                        st.session_state['merge_alignment_log'] = align_log
-                        st.session_state['pending_new_df'] = None
-                        st.session_state['pending_file_id'] = None
-                        st.session_state['pending_file_name'] = None
-                        save_active_dataset(merged_df)
-                        st.success(f"✅ Successfully merged {len(pending_df):,} samples! Total dataset now contains {len(merged_df):,} samples.")
-                        st.rerun()
+                        is_blocked = any("⛔ Cannot merge" in str(msg) for msg in align_log)
+                        if is_blocked:
+                            st.session_state['merge_alignment_log'] = align_log
+                            st.error(align_log[0])
+                        else:
+                            clear_deletion_flag()
+                            st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
+                            st.session_state['uploaded_df'] = merged_df
+                            merged_name = f"Master Merged Dataset ({len(merged_df):,} samples)"
+                            st.session_state.setdefault('datasets_dict', {})[merged_name] = merged_df
+                            st.session_state['active_ds_name'] = merged_name
+                            st.session_state['merge_alignment_log'] = align_log
+                            st.session_state['pending_new_df'] = None
+                            st.session_state['pending_file_id'] = None
+                            st.session_state['pending_file_name'] = None
+                            save_active_dataset(merged_df)
+                            st.session_state['workflow_step'] = '3 · Map columns'
+                            st.success(f"✅ Successfully merged {len(pending_df):,} samples! Total dataset now contains {len(merged_df):,} samples.")
+                            st.rerun()
                 with c_mrg2:
-                    if st.button("📁 Keep as Separate Dataset", type="primary", use_container_width=True, key="btn_separate_dataset"):
+                    if st.button("📁 Keep as Separate Dataset", type="primary", use_container_width=True, key="btn_separate_dataset", help="Preserves both datasets so you can switch between them in Results via dropdown"):
                         clear_deletion_flag()
-                        st.session_state.setdefault('datasets_dict', {})[f"Dataset 1 (Active)"] = st.session_state['uploaded_df']
-                        st.session_state['datasets_dict'][f"Dataset 2 ({pending_fname})"] = pending_df
+                        d_dict = st.session_state.setdefault('datasets_dict', {})
+                        cur_name = st.session_state.get('active_ds_name', f"Dataset 1 ({len(st.session_state['uploaded_df']):,} samples)")
+                        d_dict[cur_name] = st.session_state['uploaded_df']
+                        new_ds_lbl = f"Dataset {len(d_dict) + 1} ({pending_fname} - {len(pending_df):,} samples)"
+                        d_dict[new_ds_lbl] = pending_df
                         st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
                         st.session_state['uploaded_df'] = pending_df
+                        st.session_state['active_ds_name'] = new_ds_lbl
                         st.session_state['mapped_cols'] = {}
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
                         save_active_dataset(pending_df)
+                        st.session_state['workflow_step'] = '3 · Map columns'
                         st.success(f"📁 Added '{pending_fname}' as a separate dataset for independent analysis!")
                         st.rerun()
                 with c_mrg3:
-                    if st.button("🆕 Replace Active Dataset", type="secondary", use_container_width=True, key="btn_replace_dataset"):
+                    if st.button("🆕 Replace Active Dataset", type="secondary", use_container_width=True, key="btn_replace_dataset", help="Replaces the current active workspace"):
                         clear_deletion_flag()
                         st.session_state['last_uploaded_file_id'] = st.session_state['pending_file_id']
                         st.session_state['uploaded_df'] = pending_df
-                        st.session_state['datasets_dict'] = {f"Active Dataset ({pending_fname})": pending_df}
+                        single_lbl = f"Active Dataset ({pending_fname})"
+                        st.session_state['datasets_dict'] = {single_lbl: pending_df}
+                        st.session_state['active_ds_name'] = single_lbl
                         st.session_state['mapped_cols'] = {}
                         st.session_state['pending_new_df'] = None
                         st.session_state['pending_file_id'] = None
                         st.session_state['pending_file_name'] = None
                         save_active_dataset(pending_df)
+                        st.session_state['workflow_step'] = '3 · Map columns'
                         st.success(f"🆕 Replaced active workspace with '{pending_fname}' ({len(pending_df):,} samples).")
                         st.rerun()
 
@@ -4419,9 +4505,12 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                             filtered_df[m_col] = filtered_df[m_col].apply(clean_dyn)
 
                                 st.session_state['uploaded_df'] = filtered_df
+                                cur_ds_name = st.session_state.get('active_ds_name', 'Active Dataset')
+                                st.session_state.setdefault('datasets_dict', {})[cur_ds_name] = filtered_df
                                 save_active_dataset(filtered_df)
 
                         st.session_state['workflow_step'] = '4 · Results'
+                        save_active_session()
                         st.rerun()
 
         # -------------------------------------------------------------------------

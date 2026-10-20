@@ -142,3 +142,38 @@ def test_user_gene_selection_not_cleared_by_old_gene():
     assert 'step1_sel_gene' in st.session_state
     assert st.session_state['step1_sel_gene'] == 'ABCG2'
 
+def test_smart_merge_same_gene_distinct_and_shared_markers():
+    """Verify that merging datasets with the same gene merges shared markers and keeps distinct markers as separate columns."""
+    from core.gene_utils import smart_merge_datasets
+    df1 = pd.DataFrame({
+        'Sample ID': ['P1', 'P2'],
+        'CYP2C19*2': ['GA', 'GG'],
+        'Gender': ['M', 'F']
+    })
+    df2 = pd.DataFrame({
+        'sample_id': ['P3', 'P4'],
+        'CYP2C19*2': ['AA', 'GA'],
+        'CYP2C19*17': ['CT', 'TT'],
+        'Gender': ['F', 'M']
+    })
+
+    merged_df, align_log = smart_merge_datasets(df1, df2)
+    assert len(merged_df) == 4
+    # Demographic aligned
+    assert 'Sample ID' in merged_df.columns
+    # Shared marker merged into same column
+    assert 'CYP2C19*2' in merged_df.columns
+    # Distinct marker added as separate column
+    assert 'CYP2C19*17' in merged_df.columns
+    assert any("Distinct Marker" in msg for msg in align_log)
+
+def test_smart_merge_blocks_incompatible_genes():
+    """Verify that attempting to merge datasets representing completely different genes is blocked."""
+    from core.gene_utils import smart_merge_datasets
+    df_cyp19 = pd.DataFrame({'Sample ID': ['P1'], 'CYP2C19*2': ['GA']})
+    df_cyp9 = pd.DataFrame({'Sample ID': ['P2'], 'CYP2C9*2': ['CC']})
+
+    merged_df, align_log = smart_merge_datasets(df_cyp19, df_cyp9)
+    assert any("Cannot merge" in msg for msg in align_log)
+
+
