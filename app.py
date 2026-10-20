@@ -29,8 +29,13 @@ import pickle
 import json
 import importlib
 import core.qc
+import core.stratification
 try:
     importlib.reload(core.qc)
+except Exception:
+    pass
+try:
+    importlib.reload(core.stratification)
 except Exception:
     pass
 from core.qc import DataQCEngine
