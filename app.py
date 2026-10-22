@@ -3307,12 +3307,69 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
             curr_gene = st.session_state.get('selected_gene')
             g_idx = gene_options.index(curr_gene) if (curr_gene and curr_gene in gene_options) else 0
 
-            if 'map_step_gene_sel' in st.session_state and st.session_state['map_step_gene_sel'] not in gene_options:
+            # -------------------------------------------------------------------------
+            # QUICK GENE SWITCHER TABS & SHORTCUT PILLS (ALL 100 GENES & 147 MARKERS)
+            # -------------------------------------------------------------------------
+            all_raw_cols = list(df_raw.columns) if df_raw is not None and not df_raw.empty else []
+            detected_genes_in_file = detect_genes_in_columns(all_raw_cols) if all_raw_cols else []
+
+            # Detected in uploaded dataset shortcut chips
+            if detected_genes_in_file:
+                c_det_lbl, c_det_btns = st.columns([0.22, 0.78])
+                with c_det_lbl:
+                    st.markdown("<div style='font-size: 0.85rem; font-weight: 700; color: #1E3A8A; padding-top: 6px;'>📂 Detected in File:</div>", unsafe_allow_html=True)
+                with c_det_btns:
+                    btn_cols = st.columns(min(len(detected_genes_in_file), 8))
+                    for d_idx, d_gene in enumerate(detected_genes_in_file[:8]):
+                        is_active_d = (curr_gene == d_gene)
+                        btn_label = f"⭐ {d_gene}" if is_active_d else d_gene
+                        btn_type = "primary" if is_active_d else "secondary"
+                        if btn_cols[d_idx].button(btn_label, key=f"btn_quick_det_gene_{d_gene}_{d_idx}", type=btn_type, use_container_width=True):
+                            set_active_target_gene(d_gene, markers=None, catalog_df=catalog_df)
+                            st.rerun()
+
+            # Letter Group Tabs for fast switching across all 100 genes in the catalog
+            alpha_groups = ["All (A-Z)", "A", "B-C", "D-G", "H-M", "N-S", "T-Z"]
+            sel_alpha_group = st.radio(
+                "⚡ Gene Catalog Group:",
+                alpha_groups,
+                horizontal=True,
+                key="step3_gene_alpha_filter",
+                label_visibility="collapsed"
+            )
+
+            if sel_alpha_group == "A":
+                filtered_catalog_genes = [g for g in all_catalog_genes if g.startswith("A")]
+            elif sel_alpha_group == "B-C":
+                filtered_catalog_genes = [g for g in all_catalog_genes if g[0] in ['B', 'C']]
+            elif sel_alpha_group == "D-G":
+                filtered_catalog_genes = [g for g in all_catalog_genes if g[0] in ['D', 'E', 'F', 'G']]
+            elif sel_alpha_group == "H-M":
+                filtered_catalog_genes = [g for g in all_catalog_genes if g[0] in ['H', 'I', 'J', 'K', 'L', 'M']]
+            elif sel_alpha_group == "N-S":
+                filtered_catalog_genes = [g for g in all_catalog_genes if g[0] in ['N', 'O', 'P', 'Q', 'R', 'S']]
+            elif sel_alpha_group == "T-Z":
+                filtered_catalog_genes = [g for g in all_catalog_genes if g[0] in ['T', 'U', 'V', 'W', 'X', 'Y', 'Z']]
+            else:
+                filtered_catalog_genes = all_catalog_genes
+
+            active_gene_choices = ["(Select Target Gene)"] + filtered_catalog_genes
+            if curr_gene and curr_gene not in active_gene_choices:
+                active_gene_choices.append(curr_gene)
+
+            active_g_idx = active_gene_choices.index(curr_gene) if (curr_gene and curr_gene in active_gene_choices) else 0
+
+            if 'map_step_gene_sel' in st.session_state and st.session_state['map_step_gene_sel'] not in active_gene_choices:
                 del st.session_state['map_step_gene_sel']
 
             c_g1, c_g2 = st.columns([1, 1.8])
             with c_g1:
-                sel_map_gene_choice = st.selectbox("1️⃣ Select Target Gene:", gene_options, index=g_idx, key="map_step_gene_sel")
+                sel_map_gene_choice = st.selectbox(
+                    f"1️⃣ Target Gene ({len(filtered_catalog_genes)} available):",
+                    active_gene_choices,
+                    index=active_g_idx,
+                    key="map_step_gene_sel"
+                )
                 if sel_map_gene_choice != "(Select Target Gene)":
                     if sel_map_gene_choice != st.session_state.get('selected_gene'):
                         set_active_target_gene(sel_map_gene_choice, markers=None, catalog_df=catalog_df)
@@ -3357,7 +3414,7 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             del st.session_state['map_step_marker_sel']
 
                     sel_map_markers = st.multiselect(
-                        f"2️⃣ Select Biomarker(s) for {sel_map_gene}:",
+                        f"2️⃣ Select Biomarker(s) for {sel_map_gene} ({len(available_markers)} in catalog):",
                         available_markers,
                         default=valid_defaults,
                         key="map_step_marker_sel",
@@ -3729,10 +3786,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
-                        c_sw_map, _ = st.columns([0.4, 0.6])
-                        with c_sw_map:
-                            if st.button(f"👉 Switch Target Gene to {detected_file_genes[0]}", key="btn_switch_gene_step3_banner", type="primary"):
-                                set_active_target_gene(detected_file_genes[0], catalog_df=catalog_df)
+                        st.write("Switch Target Gene to:")
+                        sw_cols = st.columns(min(len(detected_file_genes), 6))
+                        for g_idx_sw, g_sw_name in enumerate(detected_file_genes[:6]):
+                            if sw_cols[g_idx_sw].button(f"👉 {g_sw_name}", key=f"btn_switch_gene_step3_banner_{g_sw_name}_{g_idx_sw}", type="primary"):
+                                set_active_target_gene(g_sw_name, catalog_df=catalog_df)
                                 st.rerun()
 
                     for idx, marker_label in enumerate(sel_map_markers):
