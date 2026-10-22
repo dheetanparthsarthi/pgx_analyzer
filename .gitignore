@@ -17,3 +17,9 @@ __pycache__/
 .~*.xlsx
 .~*.xls
 
+# Proprietary architecture, technical blueprints, and specifications
+PGX_ANALYZER_*.md
+*BLUEPRINT*.md
+*CODE_FLOW*.md
+
+
