@@ -4051,8 +4051,27 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                         var_mismatch = bool(var_val and var_val != 'None' and var_val not in perm_chars) if raw_perm_list else False
 
                         identical_alleles = bool(ref_val == var_val and ref_val != '' and var_val != 'None')
+                        resolved_var_allele = var_val
                         if identical_alleles:
-                            mapping_has_errors = True
+                            # Auto-resolve using active catalog / gene definitions if available
+                            catalog_cand_v = None
+                            for conf_gene in [sel_map_gene, 'CYP2C19', 'CYP2C9']:
+                                gene_dict = ALL_GENE_SNP_CONFIG.get(conf_gene, {})
+                                for k_s, v_s in gene_dict.items():
+                                    if k_s.upper() == user_marker_name.upper() or k_s.replace('*', '').upper() == user_marker_name.replace('*', '').upper():
+                                        catalog_cand_v = v_s.get('var_allele')
+                                        break
+                                if catalog_cand_v and catalog_cand_v != ref_val:
+                                    break
+                            if not catalog_cand_v or catalog_cand_v == ref_val:
+                                for fallback_v in ['C', 'T', 'G', 'A']:
+                                    if fallback_v != ref_val:
+                                        catalog_cand_v = fallback_v
+                                        break
+                            resolved_var_allele = catalog_cand_v
+                            # If permitted genotypes are provided, allow proceed smoothly without hard error
+                            if not raw_perm_list:
+                                mapping_has_errors = True
 
                         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
                         c_flg1, c_flg2 = st.columns([1.5, 1.5])
@@ -4136,10 +4155,10 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
 
                                 # Flag: Identical Alleles
                                 if identical_alleles:
-                                    st.error(f"⛔ FLAG: Reference allele ({ref_val}) and Variant allele ({var_val}) cannot be identical!")
+                                    st.warning(f"ℹ️ **Allele Auto-Alignment:** Reference and Variant alleles were both set to **{ref_val}** (monomorphic cohort). Aligned Variant allele to standard alternate **{resolved_var_allele}** so analysis can proceed smoothly.")
 
                         if sel_col != "(Select Column)" and sel_col in df_raw.columns:
-                            v_al_stored = 'A' if var_val == 'None' else var_val.strip().upper()
+                            v_al_stored = resolved_var_allele if (var_val == ref_val or var_val == 'None') else var_val.strip().upper()
                             mapped_marker_dict[sel_col] = {
                                 'std_name': user_marker_name,
                                 'ref_allele': ref_val.strip().upper(),
@@ -4445,13 +4464,29 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                 if len(mapped_marker_dict) < total_configured_targets:
                     mapping_has_errors = True
 
-                # Check for Identical Reference and Variant Alleles
+                # Check for Identical Reference and Variant Alleles - Auto-resolve gracefully
                 for col_name, m_info in mapped_marker_dict.items():
                     r_al = m_info.get('ref_allele', '')
                     v_al = m_info.get('var_allele', '')
                     if r_al and v_al and r_al == v_al and v_al != 'None':
-                        st.error(f"⛔ For marker **{m_info.get('marker_label', col_name)}**, Reference allele ({r_al}) and Variant allele ({v_al}) cannot be identical.")
-                        mapping_has_errors = True
+                        # Find alternate catalog allele
+                        m_lbl = m_info.get('marker_label', col_name)
+                        cand_alt_v = None
+                        for conf_gene in [sel_map_gene, 'CYP2C19', 'CYP2C9']:
+                            gene_dict = ALL_GENE_SNP_CONFIG.get(conf_gene, {})
+                            for k_s, v_s in gene_dict.items():
+                                if k_s.upper() == m_lbl.upper() or k_s.replace('*', '').upper() == m_lbl.replace('*', '').upper():
+                                    cand_alt_v = v_s.get('var_allele')
+                                    break
+                            if cand_alt_v and cand_alt_v != r_al:
+                                break
+                        if not cand_alt_v or cand_alt_v == r_al:
+                            for fb in ['C', 'T', 'G', 'A']:
+                                if fb != r_al:
+                                    cand_alt_v = fb
+                                    break
+                        m_info['var_allele'] = cand_alt_v
+                        st.info(f"ℹ️ **Marker {m_lbl}:** Reference and Variant alleles were both **{r_al}**. Auto-aligned Variant allele to **{cand_alt_v}** so mapping can proceed.")
 
                 # Check for unmapped calls across all mapped columns to display summary advisory (using cached calls)
                 total_unmapped_samples = 0
@@ -4499,6 +4534,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                 for g in clean_perms:
                                     if len(g) == 2:
                                         augmented_p.add(g[1] + g[0])
+                                if r_a == v_a:
+                                    for fb in ['C', 'T', 'G', 'A']:
+                                        if fb != r_a:
+                                            v_a = fb
+                                            break
                                 custom_rules_for_qc[m_info['std_name']] = {
                                     'ref_allele': r_a,
                                     'var_allele': v_a,
@@ -4508,6 +4548,11 @@ def render_workflow_pipeline(df_raw, full_results, qc_report):
                                     'hom_var_genotype': f"{v_a}{v_a}"
                                 }
                             else:
+                                if r_a == v_a:
+                                    for fb in ['C', 'T', 'G', 'A']:
+                                        if fb != r_a:
+                                            v_a = fb
+                                            break
                                 dyn_perms = {r_a + r_a, r_a + v_a, v_a + r_a, v_a + v_a}
                                 custom_rules_for_qc[m_info['std_name']] = {
                                     'ref_allele': r_a,

@@ -74,15 +74,31 @@ class ReportGenerator:
                 'HWE Interpretation': hwe.get('interpretation', '')
             })
             
-        # Phenotypes
+        # Diplotypes
         target_gene = stats_dict.get('target_gene') or stats_dict.get('active_gene') or ''
-        pgx = (
+        pgx_block = (
             stats_dict.get('pgx_summary')
             or stats_dict.get(f"{target_gene.lower()}_summary")
             or stats_dict.get('cyp2c19_summary')
             or stats_dict.get('cyp2c9_summary')
             or {}
-        ).get('phenotypes', {})
+        )
+        diplotypes_map = pgx_block.get('diplotypes', {})
+        for diplo, ddata in diplotypes_map.items():
+            rows.append({
+                'Category': f"{target_gene or 'Target Gene'} Diplotype Call",
+                'Parameter / Variant': diplo,
+                'Valid Samples': stats_dict.get('sample_count', 0),
+                'Genotype Distribution': f"Count: {ddata.get('count', 0)}",
+                'Allele Distribution': f"Frequency: {ddata.get('frequency', 0)}",
+                'Chi2 Stat': '-',
+                'P-Value': '-',
+                'Exact P-Value': '-',
+                'HWE Interpretation': f"Percentage: {ddata.get('percentage', 0)}%"
+            })
+
+        # Phenotypes
+        pgx = pgx_block.get('phenotypes', {})
         for pheno, pdata in pgx.items():
             rows.append({
                 'Category': f"{target_gene or 'Target Gene'} Metabolizer Phenotype",
@@ -105,7 +121,7 @@ class ReportGenerator:
         active_gene = full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             # 1. Full Dataset Tab
-            if 'processed_dataframe' in full_results:
+            if 'processed_dataframe' in full_results and isinstance(full_results['processed_dataframe'], pd.DataFrame) and not full_results['processed_dataframe'].empty:
                 full_df = full_results['processed_dataframe']
                 full_df.to_excel(writer, sheet_name='Full Cleaned Dataset', index=False)
                 
@@ -113,8 +129,38 @@ class ReportGenerator:
             if 'overall' in full_results:
                 ov_df = cls._dict_to_summary_table(full_results['overall'])
                 ov_df.to_excel(writer, sheet_name='Overall Population', index=False)
+
+            # 3. Dedicated Diplotype & Phenotype Analysis Tab
+            ov_pgx = (
+                full_results.get('overall', {}).get('pgx_summary')
+                or full_results.get('overall', {}).get(f"{active_gene.lower()}_summary")
+                or full_results.get('overall', {}).get('cyp2c19_summary')
+                or full_results.get('overall', {}).get('cyp2c9_summary')
+                or {}
+            )
+            diplo_rows = []
+            for d_name, d_val in ov_pgx.get('diplotypes', {}).items():
+                diplo_rows.append({
+                    'Diplotype': d_name,
+                    'Count': d_val.get('count', 0),
+                    'Frequency': d_val.get('frequency', 0.0),
+                    'Percentage (%)': f"{d_val.get('percentage', 0.0):.2f}%"
+                })
+            pheno_rows = []
+            for p_name, p_val in ov_pgx.get('phenotypes', {}).items():
+                pheno_rows.append({
+                    'Metabolizer Phenotype': p_name,
+                    'Count': p_val.get('count', 0),
+                    'Frequency': p_val.get('frequency', 0.0),
+                    'Percentage (%)': f"{p_val.get('percentage', 0.0):.2f}%"
+                })
+            if diplo_rows or pheno_rows:
+                diplo_df = pd.DataFrame(diplo_rows)
+                pheno_df = pd.DataFrame(pheno_rows)
+                combined_pgx_df = pd.concat([diplo_df, pd.DataFrame([{} for _ in range(2)]), pheno_df], axis=1)
+                combined_pgx_df.to_excel(writer, sheet_name='Diplotype & Phenotype', index=False)
                 
-            # 3. Regional Tabs (North, South, East, West)
+            # 4. Regional Tabs (North, South, East, West)
             regional_results = full_results.get('regional', {})
             for reg_name, reg_data in regional_results.items():
                 safe_reg_name = "".join([c for c in str(reg_name) if c.isalnum() or c in [' ', '_']]).strip()
@@ -124,7 +170,7 @@ class ReportGenerator:
                 reg_df = cls._dict_to_summary_table(reg_data)
                 reg_df.to_excel(writer, sheet_name=sheet_title, index=False)
                 
-            # 4. State-Wise Analysis Summary Tab
+            # 5. State-Wise Analysis Summary Tab
             state_results = full_results.get('state_wise', {})
             st_rows = []
             for st_name, st_data in state_results.items():
@@ -156,7 +202,7 @@ class ReportGenerator:
             if st_rows:
                 pd.DataFrame(st_rows).to_excel(writer, sheet_name='State-Wise Summary', index=False)
 
-            # 5. Gender Tabs
+            # 6. Gender Breakdown Tabs
             gender_results = full_results.get('gender', {})
             for gen_name, gen_data in gender_results.items():
                 sheet_title = f"Gender_{gen_name}"[:31]
@@ -261,16 +307,45 @@ class ReportGenerator:
             or overall_stats.get('cyp2c9_summary')
             or {}
         )
-        pheno_data = pgx.get('phenotypes', {})
         
-        p_table_data = [["Metabolizer Phenotype Category", "Count (N)", "Percentage (%)"]]
+        # 4A. Diplotype Distribution Table
+        diplo_data = pgx.get('diplotypes', {})
+        d_table_data = [["Star-Allele Diplotype Call", "Count (N)", "Frequency", "Percentage (%)"]]
+        for d_name, ddata in diplo_data.items():
+            d_table_data.append([
+                d_name,
+                str(ddata.get('count', 0)),
+                f"{ddata.get('frequency', 0.0):.4f}",
+                f"{ddata.get('percentage', 0.0):.2f}%"
+            ])
+        if len(d_table_data) == 1:
+            d_table_data.append(["No Diplotype Calls Recorded", "0", "0.0000", "0.0%"])
+
+        t_diplo = Table(d_table_data, colWidths=[180, 110, 110, 140])
+        t_diplo.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0284C7')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BAE6FD'))
+        ]))
+        elements.append(t_diplo)
+        elements.append(Spacer(1, 8))
+
+        # 4B. Metabolizer Phenotypes Table
+        pheno_data = pgx.get('phenotypes', {})
+        p_table_data = [["Metabolizer Phenotype Category", "Count (N)", "Frequency", "Percentage (%)"]]
         for pheno_name, pdata in pheno_data.items():
-            p_table_data.append([pheno_name, str(pdata.get('count', 0)), f"{pdata.get('percentage', 0)}%"])
+            p_table_data.append([
+                pheno_name,
+                str(pdata.get('count', 0)),
+                f"{pdata.get('frequency', 0.0):.4f}",
+                f"{pdata.get('percentage', 0.0):.2f}%"
+            ])
             
         if len(p_table_data) == 1:
-            p_table_data.append(["No Phenotype Calls Recorded", "0", "0.0%"])
+            p_table_data.append(["No Phenotype Calls Recorded", "0", "0.0000", "0.0%"])
 
-        t_pheno = Table(p_table_data, colWidths=[240, 130, 170])
+        t_pheno = Table(p_table_data, colWidths=[180, 110, 110, 140])
         t_pheno.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E40AF')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -280,8 +355,8 @@ class ReportGenerator:
         elements.append(t_pheno)
         elements.append(Spacer(1, 12))
 
-        # 5. Geographic Population Groups Section
-        elements.append(Paragraph(f"3. Geographic Population Groups Matrix ({active_gene})", heading_style))
+        # 5. Geographic Regional Groups Section
+        elements.append(Paragraph(f"3. Regional Population Groups Matrix ({active_gene})", heading_style))
         regional_results = full_results.get('regional', {})
         
         reg_table_data = [["Geographic Region", "Sample N", "Lead Marker Freq", "Lead HWE (Chi2, p)", "Poor Metabolizer %"]]
@@ -326,8 +401,50 @@ class ReportGenerator:
         elements.append(t_reg)
         elements.append(Spacer(1, 12))
 
-        # 6. Gender Stratification Section
-        elements.append(Paragraph(f"4. Gender Stratification Analysis ({active_gene})", heading_style))
+        # 6. State-Wise Analysis Summary Section
+        state_results = full_results.get('state_wise', {})
+        if state_results:
+            elements.append(Paragraph(f"4. State-Wise Geographic Profile ({active_gene})", heading_style))
+            st_table_data = [["State Name", "Sample N", "Missing %", "Lead Variant Freq", "Poor Metabolizer %"]]
+            for st_name, st_data in sorted(state_results.items(), key=lambda x: x[1].get('sample_count', 0), reverse=True)[:15]:
+                st_snps = st_data.get('snps', {})
+                lead_snp = next(iter(st_snps.keys()), None)
+                lead_var_freq = 0.0
+                if lead_snp:
+                    af = st_snps[lead_snp].get('allele_freqs', {})
+                    if len(af) > 1:
+                        lead_var_freq = list(af.values())[1]
+                    elif len(af) == 1:
+                        lead_var_freq = list(af.values())[0]
+
+                st_pm = (
+                    st_data.get('pgx_summary')
+                    or st_data.get(f"{active_gene.lower()}_summary")
+                    or st_data.get('cyp2c19_summary')
+                    or st_data.get('cyp2c9_summary')
+                    or {}
+                ).get('phenotypes', {})
+                st_pm_pct = st_pm.get('Poor Metabolizer', st_pm.get('Poor Metabolizer (PM)', {})).get('percentage', 0)
+
+                st_table_data.append([
+                    str(st_name)[:22],
+                    str(st_data.get('sample_count', 0)),
+                    f"{st_data.get('missing_pct', 0)}%",
+                    f"{lead_var_freq:.4f}",
+                    f"{st_pm_pct}%"
+                ])
+            t_state = Table(st_table_data, colWidths=[140, 70, 70, 130, 130])
+            t_state.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#B45309')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#FDE68A'))
+            ]))
+            elements.append(t_state)
+            elements.append(Spacer(1, 12))
+
+        # 7. Gender Stratification Section
+        elements.append(Paragraph(f"5. Gender Stratification Analysis ({active_gene})", heading_style))
         gender_results = full_results.get('gender', {})
         g_table_data = [["Cohort / Gender", "Sample N", "Normal Metabolizer %", "Intermediate %", "Poor Metabolizer %"]]
         
