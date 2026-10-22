@@ -13,7 +13,7 @@ KNOWN_PGX_GENES = [
 ]
 
 def load_marker_catalog_file() -> pd.DataFrame:
-    """Loads markers from List of markers_v1.xlsx if present."""
+    """Loads markers from List of markers_v1.xlsx or embedded catalog records."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     excel_path = os.path.join(base_dir, "List of markers_v1.xlsx")
     if os.path.exists(excel_path):
@@ -22,9 +22,19 @@ def load_marker_catalog_file() -> pd.DataFrame:
             df.columns = [str(c).strip() for c in df.columns]
             df['Gene'] = df['Gene'].astype(str).str.strip()
             df['Marker'] = df['Marker'].astype(str).str.strip()
-            return df
+            if not df.empty and df['Gene'].nunique() > 1:
+                return df
         except Exception:
             pass
+    try:
+        from core.marker_catalog_data import CATALOG_RECORDS
+        df = pd.DataFrame(CATALOG_RECORDS)
+        df.columns = [str(c).strip() for c in df.columns]
+        df['Gene'] = df['Gene'].astype(str).str.strip()
+        df['Marker'] = df['Marker'].astype(str).str.strip()
+        return df
+    except Exception:
+        pass
     return pd.DataFrame()
 
 def get_column_gene(col_name: str) -> str:

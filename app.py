@@ -496,7 +496,7 @@ db_manager = DatabaseManager()
 
 @st.cache_data
 def load_marker_catalog() -> pd.DataFrame:
-    """Loads and caches the 100 genes and 147 biomarkers from List of markers_v1.xlsx."""
+    """Loads and caches the 100 genes and 147 biomarkers from embedded catalog or List of markers_v1.xlsx."""
     excel_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "List of markers_v1.xlsx")
     if os.path.exists(excel_path):
         try:
@@ -504,9 +504,20 @@ def load_marker_catalog() -> pd.DataFrame:
             df.columns = [str(c).strip() for c in df.columns]
             df['Gene'] = df['Gene'].astype(str).str.strip()
             df['Marker'] = df['Marker'].astype(str).str.strip()
-            return df
+            if not df.empty and df['Gene'].nunique() > 1:
+                return df
         except Exception:
             pass
+    # Fallback to embedded catalog records (guaranteed 100 genes, 147 biomarkers in all environments)
+    try:
+        from core.marker_catalog_data import CATALOG_RECORDS
+        df = pd.DataFrame(CATALOG_RECORDS)
+        df.columns = [str(c).strip() for c in df.columns]
+        df['Gene'] = df['Gene'].astype(str).str.strip()
+        df['Marker'] = df['Marker'].astype(str).str.strip()
+        return df
+    except Exception:
+        pass
     return pd.DataFrame()
 
 def parse_maf_value(val) -> tuple[float, str]:
