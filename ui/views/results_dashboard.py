@@ -183,6 +183,7 @@ def render_results_dashboard(
     (
         tab_overview,
         tab_gen,
+        tab_comparison,
         tab_hwe,
         tab_pop,
         tab_pgx,
@@ -190,11 +191,11 @@ def render_results_dashboard(
         tab_geo,
         tab_gender,
         tab_state,
-        tab_comparison,
     ) = st.tabs(
         [
             "📊 Executive Overview",
             "🧬 Genotype & Allele",
+            "⚖️ Geographic & State Comparison",
             "⚖️ Hardy-Weinberg",
             "🌐 Population Stratification",
             f"💊 {active_gene} Calling",
@@ -202,7 +203,6 @@ def render_results_dashboard(
             "🗺️ Geographic Groups",
             "👫 Gender-Wise",
             "📍 Dedicated State Profiles",
-            "⚖️ Geographic & State Comparison",
         ]
     )
 
