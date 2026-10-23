@@ -20,6 +20,7 @@ def render_executive_overview(full_results: dict, qc_report: dict, active_gene: 
     missing_count = qc_report.get('samples_with_missing_count', 0)
     missing_pct = qc_report.get('overall_missing_pct', 0.0)
 
+    st.markdown('<div class="metric-row-anchor"></div>', unsafe_allow_html=True)
     k1, k2, k3, k4, k5 = st.columns([1, 1, 1.35, 0.9, 1.05])
     k1.metric("TOTAL SAMPLES", f"{tot_samples:,}")
     k2.metric("FULLY VALID", f"{fully_valid:,}")

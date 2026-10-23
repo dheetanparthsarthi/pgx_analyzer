@@ -362,6 +362,7 @@ def render_results_dashboard(
     st.markdown("### Export")
     st.caption("Download the full result set for the current group selection.")
 
+    st.markdown('<div class="export-nav-anchor"></div>', unsafe_allow_html=True)
     e_prev, e1, e2, e3, e_remap, e_retarget = st.columns(
         [0.18, 0.18, 0.18, 0.18, 0.14, 0.14]
     )

@@ -233,6 +233,7 @@ with main_tab_about:
     st.markdown("<br>", unsafe_allow_html=True)
 
 with main_tab_home:
+    st.markdown('<div class="step-nav-anchor"></div>', unsafe_allow_html=True)
     step_cols = st.columns(4)
     t1 = (
         "primary"

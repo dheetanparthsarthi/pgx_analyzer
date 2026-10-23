@@ -7,11 +7,26 @@ import streamlit as st
 
 CUSTOM_CSS = """
 <style>
-    /* Main Background & Clean Typography */
+    /* =========================================================================
+       1. GLOBAL RESET, TYPOGRAPHY & DESKTOP BASELINE
+       ========================================================================= */
+    html, body {
+        overflow-x: hidden !important;
+        max-width: 100vw !important;
+        -webkit-font-smoothing: antialiased !important;
+        -moz-osx-font-smoothing: grayscale !important;
+    }
+
+    *, *::before, *::after {
+        box-sizing: border-box !important;
+    }
+
     .stApp {
         background-color: #F8FAFC !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         color: #0F172A !important;
+        overflow-x: hidden !important;
+        max-width: 100vw !important;
     }
     
     /* Georgia Serif Header Titles */
@@ -19,33 +34,42 @@ CUSTOM_CSS = """
         font-family: Georgia, "Times New Roman", Times, serif !important;
         color: #0F172A !important;
         font-weight: 700 !important;
+        letter-spacing: -0.01em !important;
     }
-    
-    /* Primary Buttons Styling (Dark Forest Green #166534) */
-    button[kind="primary"] {
+
+    /* Primary Action Buttons (#166534 Dark Forest Green) */
+    button[kind="primary"],
+    button[data-testid="baseButton-primary"] {
         background-color: #166534 !important;
         color: #FFFFFF !important;
         border: none !important;
         border-radius: 6px !important;
         font-weight: 600 !important;
+        transition: all 0.15s ease-in-out !important;
     }
-    button[kind="primary"]:hover {
+    button[kind="primary"]:hover,
+    button[data-testid="baseButton-primary"]:hover {
         background-color: #15803D !important;
+        box-shadow: 0 2px 6px rgba(22, 101, 52, 0.25) !important;
     }
     
     /* Secondary Action Buttons */
-    button[kind="secondary"] {
+    button[kind="secondary"],
+    button[data-testid="baseButton-secondary"] {
         background-color: #475569 !important;
         color: #FFFFFF !important;
         border: none !important;
         border-radius: 6px !important;
         font-weight: 600 !important;
+        transition: all 0.15s ease-in-out !important;
     }
-    button[kind="secondary"]:hover {
+    button[kind="secondary"]:hover,
+    button[data-testid="baseButton-secondary"]:hover {
         background-color: #334155 !important;
+        box-shadow: 0 2px 6px rgba(51, 65, 85, 0.25) !important;
     }
 
-    /* Clean Card Box Containers */
+    /* Container Card Boxes */
     .clean-card-box {
         background-color: #FFFFFF;
         border: 1px solid #CBD5E1;
@@ -83,28 +107,29 @@ CUSTOM_CSS = """
     /* Privacy Banner */
     .privacy-info-banner {
         background-color: #E2E8F0;
-        border-radius: 4px;
+        border-radius: 6px;
         padding: 0.75rem 1rem;
         font-size: 0.85rem;
         color: #334155;
         margin-bottom: 1.2rem;
     }
 
-    /* Metric Cards */
-    .kpi-card {
+    /* KPI Cards */
+    .kpi-card, .cohort-kpi-card {
         background: #FFFFFF;
         border: 1px solid #E2E8F0;
-        border-radius: 6px;
+        border-radius: 8px;
         padding: 0.9rem;
         text-align: left;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
     .kpi-val {
         font-family: Georgia, serif;
-        font-size: 1.9rem;
+        font-size: 1.85rem;
         font-weight: 700;
         color: #0F172A;
-        line-height: 1.1;
+        line-height: 1.15;
     }
     .kpi-lbl {
         font-size: 0.68rem;
@@ -116,23 +141,25 @@ CUSTOM_CSS = """
     }
 
     /* Prevent Metric Text Truncation */
-    div[data-testid="stMetricValue"] {
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: unset !important;
-    }
-    div[data-testid="stMetricValue"] > div {
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: unset !important;
-    }
+    div[data-testid="stMetricValue"],
+    div[data-testid="stMetricValue"] > div,
     div[data-testid="stMetricDelta"] > div {
         white-space: nowrap !important;
         overflow: visible !important;
         text-overflow: unset !important;
     }
 
-    /* Table Clean Border Header Styling */
+    /* Data Tables & DataFrames */
+    div[data-testid="stDataFrame"],
+    div[data-testid="stTable"],
+    div[data-testid="stTable"] > div {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        margin-bottom: 0.75rem !important;
+    }
+
     div[data-testid="stTable"] table {
         border-collapse: collapse !important;
         width: 100% !important;
@@ -147,6 +174,7 @@ CUSTOM_CSS = """
         font-weight: 700 !important;
         letter-spacing: 0.05em !important;
         padding: 0.6rem 0.8rem !important;
+        white-space: nowrap !important;
     }
     div[data-testid="stTable"] td {
         border-bottom: 1px solid #E2E8F0 !important;
@@ -157,7 +185,10 @@ CUSTOM_CSS = """
 
     /* Sub-cohort Horizontal Radio Pills Styling */
     div[role="radiogroup"] {
-        gap: 0.5rem !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 0.45rem !important;
+        align-items: center !important;
     }
     div[role="radiogroup"] label {
         background-color: #E2E8F0 !important;
@@ -167,27 +198,289 @@ CUSTOM_CSS = """
         font-weight: 600 !important;
         color: #1E293B !important;
         border: none !important;
+        cursor: pointer !important;
+        white-space: nowrap !important;
+        transition: all 0.15s ease !important;
     }
-    div[role="radiogroup"] label[aria-checked="true"], div[role="radiogroup"] label:has(input:checked) {
+    div[role="radiogroup"] label[aria-checked="true"], 
+    div[role="radiogroup"] label:has(input:checked) {
         background-color: #166534 !important;
         color: #FFFFFF !important;
     }
-    
-    /* Ensure all tabs are visible, horizontally scrollable, and never cut off */
+
+    /* =========================================================================
+       2. TABS BAR - FULL HORIZONTAL TOUCH SCROLLING & SLEEK TABS
+       ========================================================================= */
+    div[data-testid="stTabs"] {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important;
+    }
     div[data-testid="stTabs"] [data-baseweb="tab-list"] {
-        gap: 6px !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
         overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        gap: 6px !important;
+        padding: 4px 4px 8px 4px !important;
         white-space: nowrap !important;
-        padding-bottom: 4px !important;
         scrollbar-width: thin !important;
+        scrollbar-color: #94A3B8 transparent !important;
+        border-bottom: 2px solid #E2E8F0 !important;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar {
+        height: 5px !important;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-track {
+        background: transparent !important;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+        background-color: #CBD5E1 !important;
+        border-radius: 4px !important;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
+        background-color: #94A3B8 !important;
     }
     div[data-testid="stTabs"] [data-baseweb="tab"] {
+        flex-shrink: 0 !important;
         white-space: nowrap !important;
-        padding: 8px 14px !important;
+        padding: 8px 15px !important;
         font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        min-height: 40px !important;
+        transition: all 0.15s ease !important;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab"]:hover {
+        background-color: #F1F5F9 !important;
+        color: #166534 !important;
     }
 
-    /* Footer Disclaimer */
+    /* =========================================================================
+       3. PLOTLY CHARTS & VISUALIZATIONS RESPONSIVENESS
+       ========================================================================= */
+    .js-plotly-plot, .plot-container, .user-select-none {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    /* =========================================================================
+       4. MOBILE & TABLET RESPONSIVE MEDIA QUERIES (DEVICE COMPATIBILITY)
+       ========================================================================= */
+
+    /* Tablet Landscape & Small Laptops (<= 1024px) */
+    @media (max-width: 1024px) {
+        .block-container,
+        div[data-testid="stMainBlockContainer"] {
+            padding-left: 1.25rem !important;
+            padding-right: 1.25rem !important;
+            padding-top: 2rem !important;
+            padding-bottom: 3.5rem !important;
+            max-width: 100% !important;
+        }
+
+        .kpi-val {
+            font-size: 1.6rem !important;
+        }
+    }
+
+    /* Tablets Portrait & Mobile Devices (<= 768px) */
+    @media (max-width: 768px) {
+        /* Container Spacing */
+        .block-container,
+        div[data-testid="stMainBlockContainer"],
+        div[data-testid="stAppViewBlockContainer"] {
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+            padding-top: 1.5rem !important;
+            padding-bottom: 3rem !important;
+            max-width: 100% !important;
+            overflow-x: hidden !important;
+        }
+
+        /* Typography Scaling */
+        h1, .serif-header {
+            font-size: clamp(1.35rem, 5vw, 1.8rem) !important;
+            line-height: 1.25 !important;
+        }
+        h2 {
+            font-size: clamp(1.15rem, 4.2vw, 1.45rem) !important;
+        }
+        h3 {
+            font-size: clamp(1.05rem, 3.6vw, 1.25rem) !important;
+        }
+
+        /* Top 4 Step Navigation Buttons: Clean 2x2 Grid */
+        .step-nav-anchor + div[data-testid="stHorizontalBlock"],
+        div[data-testid="stHorizontalBlock"]:has(button[key^="nav_btn_step"]),
+        div[data-testid="stHorizontalBlock"]:has(.st-key-nav_btn_step1) {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 6px !important;
+            margin-bottom: 0.6rem !important;
+        }
+        .step-nav-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(button[key^="nav_btn_step"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(.st-key-nav_btn_step1) > div[data-testid="column"] {
+            width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        button[key^="nav_btn_step"] {
+            font-size: 0.8rem !important;
+            padding: 0.45rem 0.35rem !important;
+            min-height: 42px !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+        }
+
+        /* Metric & KPI Cards: Auto-Fit Responsive Grid */
+        .metric-row-anchor + div[data-testid="stHorizontalBlock"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stMetric"]),
+        div[data-testid="stHorizontalBlock"]:has(.kpi-card),
+        div[data-testid="stHorizontalBlock"]:has(.cohort-kpi-card) {
+            display: grid !important;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
+            gap: 8px !important;
+            margin-bottom: 0.8rem !important;
+        }
+        .metric-row-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stMetric"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(.kpi-card) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(.cohort-kpi-card) > div[data-testid="column"] {
+            width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+            margin: 0 !important;
+        }
+        div[data-testid="stMetric"] {
+            background: #FFFFFF !important;
+            border: 1px solid #E2E8F0 !important;
+            border-radius: 8px !important;
+            padding: 0.65rem 0.75rem !important;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+        }
+        div[data-testid="stMetricValue"] {
+            font-size: clamp(1.2rem, 4vw, 1.55rem) !important;
+            line-height: 1.2 !important;
+        }
+        div[data-testid="stMetricLabel"] {
+            font-size: 0.66rem !important;
+            letter-spacing: 0.04em !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            color: #64748B !important;
+        }
+        .kpi-card, .cohort-kpi-card {
+            padding: 0.65rem 0.75rem !important;
+        }
+        .kpi-val {
+            font-size: clamp(1.2rem, 4vw, 1.55rem) !important;
+        }
+        .kpi-lbl {
+            font-size: 0.64rem !important;
+        }
+
+        /* Side-by-side Table/Chart Columns: Stack Vertically for Full-Width Readability */
+        div[data-testid="stHorizontalBlock"]:not(:has(button[key^="nav_btn_step"])):not(:has(div[data-testid="stMetric"])):not(:has(.kpi-card)):not(:has(.cohort-kpi-card)):not(:has(button[key="btn_sb_confirm_del"])):not(:has(button[key="btn_sb_download_xlsx"])) {
+            flex-wrap: wrap !important;
+            gap: 10px !important;
+        }
+        div[data-testid="stHorizontalBlock"]:not(:has(button[key^="nav_btn_step"])):not(:has(div[data-testid="stMetric"])):not(:has(.kpi-card)):not(:has(.cohort-kpi-card)):not(:has(button[key="btn_sb_confirm_del"])):not(:has(button[key="btn_sb_download_xlsx"])) > div[data-testid="column"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+            margin-bottom: 0.6rem !important;
+        }
+
+        /* Export Center Action Buttons: 2-Column Responsive Grid */
+        .export-nav-anchor + div[data-testid="stHorizontalBlock"],
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_toggle_pdf_prev"]),
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_excel"]),
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_csv"]) {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+        }
+        .export-nav-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_toggle_pdf_prev"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_excel"]) > div[data-testid="column"] {
+            width: 100% !important;
+            min-width: 0 !important;
+            flex: 1 1 100% !important;
+        }
+
+        /* Tabs adjustments for mobile */
+        div[data-testid="stTabs"] [data-baseweb="tab"] {
+            padding: 7px 12px !important;
+            font-size: 0.82rem !important;
+            min-height: 38px !important;
+        }
+
+        /* Box containers on mobile */
+        .clean-card-box {
+            padding: 0.9rem !important;
+            margin-bottom: 0.9rem !important;
+        }
+        .upload-container-box {
+            padding: 1.4rem 0.9rem !important;
+        }
+        .upload-icon-style {
+            font-size: 2rem !important;
+        }
+
+        /* Tables font and padding */
+        div[data-testid="stTable"] th {
+            padding: 0.45rem 0.6rem !important;
+            font-size: 0.7rem !important;
+        }
+        div[data-testid="stTable"] td {
+            padding: 0.45rem 0.6rem !important;
+            font-size: 0.8rem !important;
+        }
+
+        /* Radio Pills */
+        div[role="radiogroup"] label {
+            padding: 0.3rem 0.75rem !important;
+            font-size: 0.78rem !important;
+        }
+    }
+
+    /* Small Mobile Phones (e.g. iPhone SE, <= 480px) */
+    @media (max-width: 480px) {
+        .block-container,
+        div[data-testid="stMainBlockContainer"] {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            padding-top: 1rem !important;
+            padding-bottom: 2.5rem !important;
+        }
+
+        button[key^="nav_btn_step"] {
+            font-size: 0.74rem !important;
+            padding: 0.4rem 0.25rem !important;
+        }
+
+        .metric-row-anchor + div[data-testid="stHorizontalBlock"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stMetric"]),
+        div[data-testid="stHorizontalBlock"]:has(.kpi-card),
+        div[data-testid="stHorizontalBlock"]:has(.cohort-kpi-card) {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 6px !important;
+        }
+
+        .export-nav-anchor + div[data-testid="stHorizontalBlock"],
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_toggle_pdf_prev"]) {
+            grid-template-columns: 1fr !important;
+        }
+    }
+
+    /* =========================================================================
+       5. TOUCH-FRIENDLY SIDEBAR CONTROLS & HEADER
+       ========================================================================= */
     .footer-disclaimer-text {
         text-align: center;
         font-size: 0.8rem;
@@ -217,7 +510,7 @@ CUSTOM_CSS = """
         pointer-events: auto !important;
     }
 
-    /* Ensure Sidebar Expand and Collapse Buttons are visible */
+    /* Sidebar Expand & Collapse Buttons - Accessible Touch Targets */
     [data-testid="stExpandSidebarButton"], 
     button[data-testid="stExpandSidebarButton"],
     [data-testid="stSidebarCollapsedControl"],
@@ -230,7 +523,9 @@ CUSTOM_CSS = """
         background-color: #FFFFFF !important;
         border: 1.5px solid #94A3B8 !important;
         border-radius: 8px !important;
-        padding: 5px 8px !important;
+        padding: 6px 10px !important;
+        min-height: 40px !important;
+        min-width: 40px !important;
         margin: 0.4rem !important;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
         cursor: pointer !important;
@@ -255,7 +550,8 @@ CUSTOM_CSS = """
         background-color: #F8FAFC !important;
         border: 1px solid #CBD5E1 !important;
         border-radius: 6px !important;
-        padding: 4px 6px !important;
+        padding: 5px 8px !important;
+        min-height: 36px !important;
         cursor: pointer !important;
         pointer-events: auto !important;
     }
@@ -265,7 +561,7 @@ CUSTOM_CSS = """
         background-color: #E2E8F0 !important;
     }
 
-    /* Hide Streamlit Footer, MainMenu & Badges */
+    /* Clean UI: Hide Streamlit Badges, Footer & Status */
     #MainMenu {visibility: hidden !important; display: none !important;}
     footer {visibility: hidden !important; display: none !important;}
     [data-testid="stStatusWidget"] {visibility: hidden !important; display: none !important;}

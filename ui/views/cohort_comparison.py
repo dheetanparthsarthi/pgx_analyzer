@@ -345,6 +345,7 @@ def render_cohort_comparison(
 
     # Top KPI Comparison Header Cards
     st.markdown("<div style='margin-top: 14px;'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="metric-row-anchor"></div>', unsafe_allow_html=True)
     k1, k2, k3, k4 = st.columns(4)
 
     card_style = "background: #FFFFFF; border: 1.5px solid #E2E8F0; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);"
@@ -354,9 +355,9 @@ def render_cohort_comparison(
     with k1:
         st.markdown(
             f"""
-        <div style="{card_style}">
-            <div style="{lbl_style}">Cohort A ({type_a})</div>
-            <div style="{val_style}"><span style="color: #2563EB;">{name_a}</span></div>
+        <div class="kpi-card cohort-kpi-card" style="{card_style}">
+            <div class="kpi-lbl" style="{lbl_style}">Cohort A ({type_a})</div>
+            <div class="kpi-val" style="{val_style}"><span style="color: #2563EB;">{name_a}</span></div>
             <div style="font-size: 12px; color: #475569; margin-top: 2px;">{n_a:,} Patients</div>
         </div>
         """,
@@ -366,9 +367,9 @@ def render_cohort_comparison(
     with k2:
         st.markdown(
             f"""
-        <div style="{card_style}">
-            <div style="{lbl_style}">Cohort B ({type_b})</div>
-            <div style="{val_style}"><span style="color: #059669;">{name_b}</span></div>
+        <div class="kpi-card cohort-kpi-card" style="{card_style}">
+            <div class="kpi-lbl" style="{lbl_style}">Cohort B ({type_b})</div>
+            <div class="kpi-val" style="{val_style}"><span style="color: #059669;">{name_b}</span></div>
             <div style="font-size: 12px; color: #475569; margin-top: 2px;">{n_b:,} Patients</div>
         </div>
         """,
@@ -404,9 +405,9 @@ def render_cohort_comparison(
     with k3:
         st.markdown(
             f"""
-        <div style="{card_style}">
-            <div style="{lbl_style}">Poor Metabolizers (PM)</div>
-            <div style="{val_style}">{pm_pct_a:.1f}% vs {pm_pct_b:.1f}%</div>
+        <div class="kpi-card cohort-kpi-card" style="{card_style}">
+            <div class="kpi-lbl" style="{lbl_style}">Poor Metabolizers (PM)</div>
+            <div class="kpi-val" style="{val_style}">{pm_pct_a:.1f}% vs {pm_pct_b:.1f}%</div>
             <div style="font-size: 12px; color: #DC2626; margin-top: 2px;">Δ {abs(pm_pct_a - pm_pct_b):.1f}% difference</div>
         </div>
         """,
@@ -427,9 +428,9 @@ def render_cohort_comparison(
     with k4:
         st.markdown(
             f"""
-        <div style="{card_style}">
-            <div style="{lbl_style}">Intermediate Metabolizers (IM)</div>
-            <div style="{val_style}">{im_pct_a:.1f}% vs {im_pct_b:.1f}%</div>
+        <div class="kpi-card cohort-kpi-card" style="{card_style}">
+            <div class="kpi-lbl" style="{lbl_style}">Intermediate Metabolizers (IM)</div>
+            <div class="kpi-val" style="{val_style}">{im_pct_a:.1f}% vs {im_pct_b:.1f}%</div>
             <div style="font-size: 12px; color: #D97706; margin-top: 2px;">Δ {abs(im_pct_a - im_pct_b):.1f}% difference</div>
         </div>
         """,
@@ -639,7 +640,7 @@ def render_cohort_comparison(
         st.markdown(
             f"""
         <div style="background: {bg_color}; border: 1.5px solid {border_color}; border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
                 <div style="font-size: 15px; font-weight: 700; color: #0F172A;">
                     {item['drug']}
                 </div>
