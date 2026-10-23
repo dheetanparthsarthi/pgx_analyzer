@@ -1,0 +1,3 @@
+"""
+Analytical Result Views package.
+"""
