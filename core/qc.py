@@ -135,7 +135,7 @@ class DataQCEngine:
             }
             missing_gender = {'', 'null', 'none', 'not mentioned', 'not specified', 'nan', 'na', 'unknown'}
             df['Gender_Clean'] = gender_series.map(
-                lambda value: 'Unknown' if value in missing_gender else gender_map.get(value, value.title())
+                lambda value: 'Unknown' if value in missing_gender else gender_map.get(value, str(value).title())
             )
         else:
             df['Gender_Clean'] = 'Unknown'

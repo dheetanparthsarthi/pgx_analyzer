@@ -31,11 +31,13 @@ STATE_TO_REGION: Dict[str, str] = {
     'Chandigarh': 'North India',
     'Jammu & Kashmir': 'North India',
     'Jammu and Kashmir': 'North India',
+    'Jammu Kashmir': 'North India',
     'Ladakh': 'North India',
     'Rajasthan': 'North India',
     
     # East India
     'Odisha': 'East India',
+    'Orissa': 'East India',
     'West Bengal': 'East India',
     'Bihar': 'East India',
     'Jharkhand': 'East India',
@@ -51,6 +53,7 @@ STATE_TO_REGION: Dict[str, str] = {
     # West India
     'Maharashtra': 'West India',
     'Gujarat': 'West India',
+    'Gujrat': 'West India',
     'Dadra and Nagar Haveli': 'West India',
     'Daman and Diu': 'West India',
     
