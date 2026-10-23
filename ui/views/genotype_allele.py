@@ -8,10 +8,25 @@ import plotly.express as px
 import streamlit as st
 from config import SNP_CONFIG, CYP2C9_SNP_CONFIG
 
-def render_genotype_allele(sel_key: str, sel_cohort: dict, qc_report: dict):
+def render_genotype_allele(
+    active_gene: str = None,
+    active_markers: list = None,
+    active_snp_conf: dict = None,
+    full_results: dict = None,
+    render_subcohort_pills = None,
+    **kwargs
+):
     """Renders genotype frequencies, zygosity types, and allele charts for the selected cohort."""
+    if render_subcohort_pills is not None:
+        sel_key, sel_cohort = render_subcohort_pills("tab_gen")
+    else:
+        sel_key = kwargs.get('sel_key', 'Overall')
+        sel_cohort = kwargs.get('sel_cohort', (full_results.get('overall', {}) if full_results else {}))
+
     snps_data = sel_cohort.get('snps', {})
-    active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
+    if active_snp_conf is None:
+        active_snp_conf = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
+
 
     def get_zygosity(gt_name, snp_name):
         snp_conf = active_snp_conf.get(snp_name, {})
