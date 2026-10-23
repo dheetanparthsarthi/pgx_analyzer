@@ -283,3 +283,61 @@ CUSTOM_CSS = """
 def inject_custom_styles():
     """Injects custom CSS stylesheet into the Streamlit app."""
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def apply_custom_styles():
+    """Alias for inject_custom_styles."""
+    inject_custom_styles()
+
+
+def render_sidebar_controls(df_raw, reset_all_data_fn):
+    """Renders persistent sidebar branding and dataset management controls."""
+    with st.sidebar:
+        st.image("https://cdn-icons-png.flaticon.com/512/3004/3004458.png", width=52)
+        st.markdown("<h2 style='font-size: 1.25rem; margin: 0; padding: 0;'>PGx Analytics Pro</h2>", unsafe_allow_html=True)
+        st.caption("Automated Population Pharmacogenomics Platform")
+
+        st.divider()
+
+        # Workspace Controls (Reset / Delete / Download)
+        st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-bottom: 6px;'>⚙️ Workspace Actions</div>", unsafe_allow_html=True)
+        if st.session_state.get('show_delete_confirm', False):
+            st.warning("⚠️ **Delete Active Dataset?**\nResets workspace to 0 samples.")
+            c_del1, c_del2 = st.columns(2)
+            with c_del1:
+                if st.button("🔴 Delete", type="primary", use_container_width=True, key="btn_sb_confirm_del"):
+                    reset_all_data_fn()
+                    st.success("Dataset deleted.")
+                    st.rerun()
+            with c_del2:
+                if st.button("❌ Cancel", type="secondary", use_container_width=True, key="btn_sb_cancel_del"):
+                    st.session_state['show_delete_confirm'] = False
+                    st.rerun()
+        else:
+            if st.button("🗑️ Delete Active Dataset", type="secondary", use_container_width=True, key="btn_sb_init_del"):
+                st.session_state['show_delete_confirm'] = True
+                st.rerun()
+
+        if df_raw is not None and not df_raw.empty:
+            st.markdown("<div style='font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748B; letter-spacing: 0.05em; margin-top: 14px; margin-bottom: 6px;'>📥 Download Complete Dataset</div>", unsafe_allow_html=True)
+            from ui.views.results_dashboard import get_df_download_excel, get_df_download_csv
+            c_sb_dl1, c_sb_dl2 = st.columns(2)
+            with c_sb_dl1:
+                st.download_button(
+                    label="⬇️ Excel (.xlsx)",
+                    data=get_df_download_excel(df_raw),
+                    file_name="Complete_PGx_Dataset.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="btn_sb_download_xlsx"
+                )
+            with c_sb_dl2:
+                st.download_button(
+                    label="⬇️ CSV (.csv)",
+                    data=get_df_download_csv(df_raw),
+                    file_name="Complete_PGx_Dataset.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="btn_sb_download_csv"
+                )
+
