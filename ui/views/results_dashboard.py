@@ -18,6 +18,7 @@ from ui.session_manager import (
     save_active_dataset,
     save_active_session,
 )
+from ui.views.cohort_comparison import render_cohort_comparison
 from ui.views.diplotype_phenotype import render_diplotype_phenotype
 from ui.views.executive_overview import render_executive_overview
 from ui.views.gender_analysis import render_gender_analysis
@@ -178,7 +179,7 @@ def render_results_dashboard(
             active_gene, catalog_df=load_marker_catalog()
         )
 
-    # 9 Main Tabs Consolidating All Analysis Views
+    # 10 Main Tabs Consolidating All Analysis Views & Comparison Studio
     (
         tab_overview,
         tab_gen,
@@ -189,6 +190,7 @@ def render_results_dashboard(
         tab_geo,
         tab_gender,
         tab_state,
+        tab_comparison,
     ) = st.tabs(
         [
             "📊 Executive Overview",
@@ -200,6 +202,7 @@ def render_results_dashboard(
             "🗺️ Geographic Groups",
             "👫 Gender-Wise",
             "📍 Dedicated State Profiles",
+            "⚖️ Geographic & State Comparison",
         ]
     )
 
@@ -341,6 +344,15 @@ def render_results_dashboard(
             active_gene,
             active_markers,
             active_snp_conf,
+            full_results,
+            processed_df,
+        )
+
+    # 10. Geographic & State Comparison & Predictions
+    with tab_comparison:
+        render_cohort_comparison(
+            active_gene,
+            active_markers,
             full_results,
             processed_df,
         )
