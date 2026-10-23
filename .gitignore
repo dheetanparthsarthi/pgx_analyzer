@@ -6,3 +6,5 @@ __pycache__/
 .idea/
 *.db
 .data_deleted.flag
+*.pkl
+.~*

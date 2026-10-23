@@ -3,8 +3,14 @@
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    HAS_PLOTLY = True
+except Exception:
+    HAS_PLOTLY = False
+    px = None
+    go = None
 from scipy import stats
 import streamlit as st
 
@@ -523,19 +529,23 @@ def render_cohort_comparison(
 
     with c_fig_m:
         if chart_marker_rows:
-            fig_cmp_maf = px.bar(
-                pd.DataFrame(chart_marker_rows),
-                x="Biomarker",
-                y="Frequency",
-                color="Cohort",
-                barmode="group",
-                title="Allele Frequency Comparison",
-                color_discrete_sequence=["#2563EB", "#059669"],
-            )
-            fig_cmp_maf.update_layout(
-                height=260, margin=dict(l=10, r=10, t=32, b=10)
-            )
-            st.plotly_chart(fig_cmp_maf, use_container_width=True)
+            if HAS_PLOTLY and px is not None:
+                fig_cmp_maf = px.bar(
+                    pd.DataFrame(chart_marker_rows),
+                    x="Biomarker",
+                    y="Frequency",
+                    color="Cohort",
+                    barmode="group",
+                    title="Allele Frequency Comparison",
+                    color_discrete_sequence=["#2563EB", "#059669"],
+                )
+                fig_cmp_maf.update_layout(
+                    height=260, margin=dict(l=10, r=10, t=32, b=10)
+                )
+                st.plotly_chart(fig_cmp_maf, use_container_width=True)
+            else:
+                m_df = pd.DataFrame(chart_marker_rows)
+                st.bar_chart(m_df, x="Biomarker", y="Frequency", color="Cohort")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -592,19 +602,23 @@ def render_cohort_comparison(
 
     with c_phe_f:
         if pheno_chart_data:
-            fig_cmp_phe = px.bar(
-                pd.DataFrame(pheno_chart_data),
-                x="Phenotype",
-                y="Percentage",
-                color="Cohort",
-                barmode="group",
-                title="Phenotype Shift (% Total Cohort)",
-                color_discrete_sequence=["#2563EB", "#059669"],
-            )
-            fig_cmp_phe.update_layout(
-                height=260, margin=dict(l=10, r=10, t=32, b=10)
-            )
-            st.plotly_chart(fig_cmp_phe, use_container_width=True)
+            if HAS_PLOTLY and px is not None:
+                fig_cmp_phe = px.bar(
+                    pd.DataFrame(pheno_chart_data),
+                    x="Phenotype",
+                    y="Percentage",
+                    color="Cohort",
+                    barmode="group",
+                    title="Phenotype Shift (% Total Cohort)",
+                    color_discrete_sequence=["#2563EB", "#059669"],
+                )
+                fig_cmp_phe.update_layout(
+                    height=260, margin=dict(l=10, r=10, t=32, b=10)
+                )
+                st.plotly_chart(fig_cmp_phe, use_container_width=True)
+            else:
+                p_df = pd.DataFrame(pheno_chart_data)
+                st.bar_chart(p_df, x="Phenotype", y="Percentage", color="Cohort")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

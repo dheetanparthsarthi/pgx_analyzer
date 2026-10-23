@@ -216,7 +216,9 @@ CUSTOM_CSS = """
         max-width: 100% !important;
         overflow-x: hidden !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    div[data-testid="stTabs"] [role="tablist"],
+    div[data-testid="stTabs"] [data-baseweb="tab-list"],
+    div[role="tablist"] {
         display: flex !important;
         flex-wrap: nowrap !important;
         overflow-x: auto !important;
@@ -228,20 +230,30 @@ CUSTOM_CSS = """
         scrollbar-color: #94A3B8 transparent !important;
         border-bottom: 2px solid #E2E8F0 !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar {
+    div[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar,
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar,
+    div[role="tablist"]::-webkit-scrollbar {
         height: 5px !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-track {
+    div[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar-track,
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-track,
+    div[role="tablist"]::-webkit-scrollbar-track {
         background: transparent !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+    div[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar-thumb,
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb,
+    div[role="tablist"]::-webkit-scrollbar-thumb {
         background-color: #CBD5E1 !important;
         border-radius: 4px !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover {
+    div[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar-thumb:hover,
+    div[data-testid="stTabs"] [data-baseweb="tab-list"]::-webkit-scrollbar-thumb:hover,
+    div[role="tablist"]::-webkit-scrollbar-thumb:hover {
         background-color: #94A3B8 !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab"] {
+    div[data-testid="stTabs"] [role="tab"],
+    div[data-testid="stTabs"] [data-baseweb="tab"],
+    div[role="tab"] {
         flex-shrink: 0 !important;
         white-space: nowrap !important;
         padding: 8px 15px !important;
@@ -251,8 +263,12 @@ CUSTOM_CSS = """
         min-height: 40px !important;
         transition: all 0.15s ease !important;
     }
-    div[data-testid="stTabs"] [data-baseweb="tab"]:hover {
+    div[data-testid="stTabs"] [role="tab"]:hover,
+    div[data-testid="stTabs"] [data-baseweb="tab"]:hover,
+    div[role="tab"]:hover {
         background-color: #F1F5F9 !important;
+        color: #166534 !important;
+    }
         color: #166534 !important;
     }
 
@@ -310,58 +326,69 @@ CUSTOM_CSS = """
             font-size: clamp(1.05rem, 3.6vw, 1.25rem) !important;
         }
 
-        /* Top 4 Step Navigation Buttons: Clean 2x2 Grid */
-        .step-nav-anchor + div[data-testid="stHorizontalBlock"],
-        div[data-testid="stHorizontalBlock"]:has(button[key^="nav_btn_step"]),
-        div[data-testid="stHorizontalBlock"]:has(.st-key-nav_btn_step1) {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-            gap: 6px !important;
+        /* =====================================================================
+           RESPONSIVE COLUMN WRAPPING FOR MOBILE / TABLET DEVICES
+           ===================================================================== */
+        /* Any multi-column horizontal block wraps naturally on mobile */
+        div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+            width: 100% !important;
+        }
+
+        /* Default columns on mobile: 50% width (perfect 2-per-row grid for cards & buttons) */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Content blocks with tables, dataframes, or plotly charts stack into 100% full width */
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stDataFrame"]) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stDataFrame"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stTable"]) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stTable"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(table) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(table) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(.js-plotly-plot) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(.js-plotly-plot) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stPlotlyChart"]) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stPlotlyChart"]) > div[data-testid="column"] {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
             margin-bottom: 0.6rem !important;
         }
-        .step-nav-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-        div[data-testid="stHorizontalBlock"]:has(button[key^="nav_btn_step"]) > div[data-testid="column"],
-        div[data-testid="stHorizontalBlock"]:has(.st-key-nav_btn_step1) > div[data-testid="column"] {
-            width: 100% !important;
-            min-width: 0 !important;
-            flex: 1 1 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-        }
+
+        /* Top 4 Step Navigation Buttons Styling */
+        .st-key-nav_btn_step1 button,
+        .st-key-nav_btn_step2 button,
+        .st-key-nav_btn_step3 button,
+        .st-key-nav_btn_step4 button,
         button[key^="nav_btn_step"] {
-            font-size: 0.8rem !important;
-            padding: 0.45rem 0.35rem !important;
+            width: 100% !important;
+            font-size: 0.82rem !important;
+            padding: 0.5rem 0.35rem !important;
             min-height: 42px !important;
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
         }
 
-        /* Metric & KPI Cards: Auto-Fit Responsive Grid */
-        .metric-row-anchor + div[data-testid="stHorizontalBlock"],
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stMetric"]),
-        div[data-testid="stHorizontalBlock"]:has(.kpi-card),
-        div[data-testid="stHorizontalBlock"]:has(.cohort-kpi-card) {
-            display: grid !important;
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
-            gap: 8px !important;
-            margin-bottom: 0.8rem !important;
-        }
-        .metric-row-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stMetric"]) > div[data-testid="column"],
-        div[data-testid="stHorizontalBlock"]:has(.kpi-card) > div[data-testid="column"],
-        div[data-testid="stHorizontalBlock"]:has(.cohort-kpi-card) > div[data-testid="column"] {
-            width: 100% !important;
-            min-width: 0 !important;
-            flex: 1 1 auto !important;
-            margin: 0 !important;
-        }
+        /* Metric & KPI Cards Styling */
         div[data-testid="stMetric"] {
             background: #FFFFFF !important;
             border: 1px solid #E2E8F0 !important;
             border-radius: 8px !important;
             padding: 0.65rem 0.75rem !important;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03) !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
         }
         div[data-testid="stMetricValue"] {
             font-size: clamp(1.2rem, 4vw, 1.55rem) !important;
@@ -376,6 +403,8 @@ CUSTOM_CSS = """
         }
         .kpi-card, .cohort-kpi-card {
             padding: 0.65rem 0.75rem !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
         }
         .kpi-val {
             font-size: clamp(1.2rem, 4vw, 1.55rem) !important;
@@ -384,37 +413,23 @@ CUSTOM_CSS = """
             font-size: 0.64rem !important;
         }
 
-        /* Side-by-side Table/Chart Columns: Stack Vertically for Full-Width Readability */
-        div[data-testid="stHorizontalBlock"]:not(:has(button[key^="nav_btn_step"])):not(:has(div[data-testid="stMetric"])):not(:has(.kpi-card)):not(:has(.cohort-kpi-card)):not(:has(button[key="btn_sb_confirm_del"])):not(:has(button[key="btn_sb_download_xlsx"])) {
-            flex-wrap: wrap !important;
-            gap: 10px !important;
-        }
-        div[data-testid="stHorizontalBlock"]:not(:has(button[key^="nav_btn_step"])):not(:has(div[data-testid="stMetric"])):not(:has(.kpi-card)):not(:has(.cohort-kpi-card)):not(:has(button[key="btn_sb_confirm_del"])):not(:has(button[key="btn_sb_download_xlsx"])) > div[data-testid="column"] {
-            width: 100% !important;
-            min-width: 100% !important;
-            flex: 1 1 100% !important;
-            margin-bottom: 0.6rem !important;
-        }
-
         /* Export Center Action Buttons: 2-Column Responsive Grid */
-        .export-nav-anchor + div[data-testid="stHorizontalBlock"],
-        div[data-testid="stHorizontalBlock"]:has(button[key="btn_toggle_pdf_prev"]),
-        div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_excel"]),
-        div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_csv"]) {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-            gap: 8px !important;
-        }
+        .export-nav-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
         .export-nav-anchor + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(.st-key-btn_toggle_pdf_prev) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(.st-key-btn_toggle_pdf_prev) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_toggle_pdf_prev"]) > div[data-testid="stColumn"],
         div[data-testid="stHorizontalBlock"]:has(button[key="btn_toggle_pdf_prev"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_excel"]) > div[data-testid="stColumn"],
         div[data-testid="stHorizontalBlock"]:has(button[key="btn_exp_excel"]) > div[data-testid="column"] {
-            width: 100% !important;
-            min-width: 0 !important;
-            flex: 1 1 100% !important;
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
         }
 
         /* Tabs adjustments for mobile */
-        div[data-testid="stTabs"] [data-baseweb="tab"] {
+        div[data-testid="stTabs"] [role="tab"],
+        div[data-testid="stTabs"] [data-baseweb="tab"],
+        div[role="tab"] {
             padding: 7px 12px !important;
             font-size: 0.82rem !important;
             min-height: 38px !important;

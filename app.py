@@ -33,7 +33,7 @@ st.set_page_config(
     page_title="Population Pharmacogenomics Analysis Platform",
     page_icon="🧬",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 apply_custom_styles()
 
