@@ -12,7 +12,7 @@ from marker_catalog import (
     get_default_markers_for_gene,
     load_marker_catalog,
 )
-from report_gen import ReportGenerator
+from reports.report_generator import ReportGenerator
 from ui.session_manager import (
     has_active_data,
     save_active_dataset,

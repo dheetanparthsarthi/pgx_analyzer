@@ -162,3 +162,92 @@ def set_active_target_gene(gene_symbol: str, markers: list = None, catalog_df: p
         if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_', '_mapped_', '_col_tracker_')):
             del st.session_state[k]
     save_active_session()
+
+
+def clear_deletion_flag():
+    """Clears the disk-based permanent deletion marker file and purges cache."""
+    st.session_state['is_deleted'] = False
+    if os.path.exists(DELETED_FLAG_FILE):
+        try:
+            os.remove(DELETED_FLAG_FILE)
+        except Exception:
+            pass
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+
+def reset_all_data():
+    """Clears session dataset, resets custom column mappings, creates permanent deletion marker, and purges database & cache."""
+    st.session_state['is_deleted'] = True
+    st.session_state['uploaded_df'] = pd.DataFrame()
+    st.session_state['selected_gene'] = None
+    st.session_state['selected_markers'] = []
+    st.session_state['mapped_cols'] = {}
+    st.session_state['demographic_mapping'] = {}
+    st.session_state['custom_translation_rules'] = {}
+    st.session_state['datasets_dict'] = {}
+    st.session_state['last_uploaded_file_id'] = None
+    st.session_state['pending_new_df'] = None
+    st.session_state['pending_file_id'] = None
+    st.session_state['pending_file_name'] = None
+    st.session_state['merge_alignment_log'] = None
+    st.session_state['show_delete_confirm'] = False
+    st.session_state['workflow_step'] = '1 · Select Target'
+    for k in list(st.session_state.keys()):
+        if k.startswith(('w_map_', 'sel_ref_', 'sel_var_', 'custom_ref_', 'custom_var_', 'ex_', 'step1_sel_', 'map_step_')):
+            del st.session_state[k]
+
+    clear_active_dataset_cache()
+    try:
+        with open(DELETED_FLAG_FILE, "w") as f:
+            f.write("deleted")
+    except Exception:
+        pass
+
+    try:
+        from database.db_manager import DatabaseManager
+        DatabaseManager().clear_database()
+    except Exception:
+        pass
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
+
+def init_session_state():
+    """Initializes session defaults and restores persisted cache."""
+    init_session_defaults()
+    if not st.session_state.get('is_deleted', False):
+        persisted_dict = load_persisted_datasets_dict()
+        if persisted_dict:
+            st.session_state['datasets_dict'] = persisted_dict
+
+        load_persisted_session()
+
+        cur_ds_name = st.session_state.get('active_ds_name')
+        if cur_ds_name and cur_ds_name in st.session_state.get('datasets_dict', {}):
+            st.session_state['uploaded_df'] = st.session_state['datasets_dict'][cur_ds_name]
+        elif st.session_state.get('uploaded_df') is None or len(st.session_state['uploaded_df']) == 0:
+            persisted_df = load_persisted_dataset()
+            if persisted_df is not None and len(persisted_df) > 0:
+                st.session_state['uploaded_df'] = persisted_df
+                if not st.session_state.get('datasets_dict'):
+                    st.session_state['datasets_dict'] = {'Active Dataset': persisted_df}
+                    st.session_state['active_ds_name'] = 'Active Dataset'
+
+    if st.session_state.get('uploaded_df') is None:
+        st.session_state['uploaded_df'] = pd.DataFrame()
+
+
+def has_active_data() -> bool:
+    """Checks whether the active workspace has loaded dataset records."""
+    df = st.session_state.get('uploaded_df')
+    if df is not None and not df.empty and len(df) > 0:
+        return True
+    return False
+
+
