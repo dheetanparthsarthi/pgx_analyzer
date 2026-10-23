@@ -112,11 +112,60 @@ def run_fast_pipeline(
                 pass
 
     clean_df, qc_report = qc_engine.run_qc()
+
+    # Discard samples with null/missing genotypes for target markers so analysis shows strictly non-null data
+    target_markers = []
+    if snp_rules:
+        target_markers = [m for m in snp_rules.keys() if m in clean_df.columns]
+    if not target_markers:
+        target_markers = [
+            c
+            for c in clean_df.columns
+            if (
+                "*" in c
+                or "rs" in c.lower()
+                or (active_gene and active_gene.lower() in c.lower())
+            )
+            and c
+            not in (
+                "Sample_ID",
+                "Region",
+                "Gender",
+                "State",
+                "State_Clean",
+                "Gender_Clean",
+                "Diplotype",
+                "Phenotype",
+                "Activity_Score",
+                "Test_Requested",
+                "Date_of_Birth",
+            )
+        ]
+
+    if target_markers and not clean_df.empty:
+        valid_mask = clean_df[target_markers].notna().all(axis=1)
+        discarded_null_count = int((~valid_mask).sum())
+        qc_report["discarded_null_samples"] = discarded_null_count
+        qc_report["total_analyzed_samples"] = int(valid_mask.sum())
+        analyzed_df = (
+            clean_df[valid_mask].copy() if valid_mask.any() else clean_df.copy()
+        )
+    else:
+        analyzed_df = clean_df.copy()
+        qc_report["discarded_null_samples"] = 0
+        qc_report["total_analyzed_samples"] = len(clean_df)
+
     full_results = DemographicStratifier.stratify_and_analyze(
-        clean_df,
+        analyzed_df,
         custom_snp_rules=snp_rules,
         active_gene=active_gene,
         custom_translation_rules=translation_rules,
+    )
+    full_results["discarded_null_samples"] = qc_report.get(
+        "discarded_null_samples", 0
+    )
+    full_results["total_input_samples"] = qc_report.get(
+        "total_samples", len(clean_df)
     )
     return clean_df, qc_report, full_results
 

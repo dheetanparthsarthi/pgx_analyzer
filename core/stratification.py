@@ -334,10 +334,20 @@ class DemographicStratifier:
         unique_states = data_processed['State_Clean'].unique() if 'State_Clean' in data_processed.columns else []
         for state in unique_states:
             state_str = str(state).strip()
-            if state_str and state_str.lower() != 'nan':
+            if state_str and state_str.lower() not in ('nan', 'none', 'null'):
                 st_df = data_processed[data_processed['State_Clean'] == state]
                 if len(st_df) > 0:
                     results['state_wise'][state_str] = analyze_subgroup(st_df, state_str)
+
+        # Retain and display unclassified/missing states
+        unclass_state_df = data_processed[
+            data_processed['State_Clean'].isna()
+            | data_processed['State_Clean'].astype(str).str.strip().isin(['', 'nan', 'null', 'none'])
+        ]
+        if len(unclass_state_df) > 0:
+            results['state_wise']['Unclassified / Other State'] = analyze_subgroup(
+                unclass_state_df, 'Unclassified / Other State'
+            )
 
         # 4. Gender / demographic-category analysis, based on values in the data.
         genders = sorted(data_processed['Gender_Clean'].dropna().astype(str).unique()) if 'Gender_Clean' in data_processed.columns else []

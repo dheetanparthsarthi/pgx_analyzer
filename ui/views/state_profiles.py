@@ -27,6 +27,12 @@ def render_state_profiles(
         )
         st_data = state_dict[selected_st]
 
+        if "Unclassified" in selected_st:
+            st.info(
+                "ℹ️ **Unclassified / Missing State Cohort**: These samples have missing or unmapped state information in your dataset. "
+                "Their genotypes, allele frequencies, and phenotypes are preserved and displayed here for full visibility."
+            )
+
         primary_marker = (
             st.selectbox(
                 "Select marker for this state profile:",

@@ -38,13 +38,26 @@ def _get_cohort_data(
             if "State_Clean" in processed_df.columns
             else ("State" if "State" in processed_df.columns else None)
         )
-        subset_df = (
-            processed_df[
-                processed_df[state_col].astype(str) == str(cohort_name)
-            ]
-            if state_col and state_col in processed_df.columns
-            else pd.DataFrame()
-        )
+        if cohort_name == "Unclassified / Other State":
+            subset_df = (
+                processed_df[
+                    processed_df[state_col].isna()
+                    | processed_df[state_col]
+                    .astype(str)
+                    .str.strip()
+                    .isin(["", "nan", "null", "none"])
+                ]
+                if state_col and state_col in processed_df.columns
+                else pd.DataFrame()
+            )
+        else:
+            subset_df = (
+                processed_df[
+                    processed_df[state_col].astype(str) == str(cohort_name)
+                ]
+                if state_col and state_col in processed_df.columns
+                else pd.DataFrame()
+            )
     else:  # Overall
         cohort_stats = full_results.get("overall", {})
         subset_df = processed_df.copy()

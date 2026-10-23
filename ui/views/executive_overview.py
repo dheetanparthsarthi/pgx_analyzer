@@ -20,13 +20,19 @@ def render_executive_overview(full_results: dict, qc_report: dict, active_gene: 
     missing_count = qc_report.get('samples_with_missing_count', 0)
     missing_pct = qc_report.get('overall_missing_pct', 0.0)
 
+    discarded_null = full_results.get('discarded_null_samples', qc_report.get('discarded_null_samples', 0))
+    total_input = full_results.get('total_input_samples', qc_report.get('total_samples', tot_samples))
+
     st.markdown('<div class="metric-row-anchor"></div>', unsafe_allow_html=True)
     k1, k2, k3, k4, k5 = st.columns([1, 1, 1.35, 0.9, 1.05])
-    k1.metric("TOTAL SAMPLES", f"{tot_samples:,}")
+    if discarded_null > 0:
+        k1.metric("ANALYZED SAMPLES", f"{tot_samples:,}", f"-{discarded_null} null discarded", delta_color="inverse")
+    else:
+        k1.metric("ANALYZED SAMPLES", f"{tot_samples:,}")
     k2.metric("FULLY VALID", f"{fully_valid:,}")
-    k3.metric("MISSING GENOTYPES", f"{missing_pct:.1f}%", f"{missing_count:,} samples", delta_color="off")
+    k3.metric("MISSING CALLS", f"{missing_pct:.1f}%", f"{missing_count:,} samples", delta_color="off")
     k4.metric("DUPLICATE IDS", dup_count)
-    k5.metric("INVALID GENOTYPE CALLS", invalid_count)
+    k5.metric("INVALID GENOTYPES", invalid_count)
 
     if dup_ids:
         st.markdown(f"""
