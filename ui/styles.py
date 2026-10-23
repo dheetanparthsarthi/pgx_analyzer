@@ -173,6 +173,20 @@ CUSTOM_CSS = """
         color: #FFFFFF !important;
     }
     
+    /* Ensure all tabs are visible, horizontally scrollable, and never cut off */
+    div[data-testid="stTabs"] [data-baseweb="tab-list"] {
+        gap: 6px !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        padding-bottom: 4px !important;
+        scrollbar-width: thin !important;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab"] {
+        white-space: nowrap !important;
+        padding: 8px 14px !important;
+        font-size: 0.88rem !important;
+    }
+
     /* Footer Disclaimer */
     .footer-disclaimer-text {
         text-align: center;
