@@ -407,6 +407,18 @@ def render_cohort_comparison(
         .get("Poor Metabolizer", {})
         .get("percentage", 0.0)
     )
+    pm_count_a = int(
+        pgx_a.get("phenotypes", {})
+        .get("Poor Metabolizer", {})
+        .get("count", 0)
+    )
+    pm_count_b = int(
+        pgx_b.get("phenotypes", {})
+        .get("Poor Metabolizer", {})
+        .get("count", 0)
+    )
+    pm_diff = abs(pm_pct_a - pm_pct_b)
+    pm_diff_color = "#64748B" if pm_diff == 0.0 else "#DC2626"
 
     with k3:
         st.markdown(
@@ -414,7 +426,8 @@ def render_cohort_comparison(
         <div class="kpi-card cohort-kpi-card" style="{card_style}">
             <div class="kpi-lbl" style="{lbl_style}">Poor Metabolizers (PM)</div>
             <div class="kpi-val" style="{val_style}">{pm_pct_a:.1f}% vs {pm_pct_b:.1f}%</div>
-            <div style="font-size: 12px; color: #DC2626; margin-top: 2px;">Δ {abs(pm_pct_a - pm_pct_b):.1f}% difference</div>
+            <div style="font-size: 11px; color: #64748B; margin-top: 2px;">({pm_count_a}/{n_a} vs {pm_count_b}/{n_b} samples)</div>
+            <div style="font-size: 12px; color: {pm_diff_color}; font-weight: 600; margin-top: 2px;">Δ {pm_diff:.1f}% difference</div>
         </div>
         """,
             unsafe_allow_html=True,
@@ -430,6 +443,18 @@ def render_cohort_comparison(
         .get("Intermediate Metabolizer", {})
         .get("percentage", 0.0)
     )
+    im_count_a = int(
+        pgx_a.get("phenotypes", {})
+        .get("Intermediate Metabolizer", {})
+        .get("count", 0)
+    )
+    im_count_b = int(
+        pgx_b.get("phenotypes", {})
+        .get("Intermediate Metabolizer", {})
+        .get("count", 0)
+    )
+    im_diff = abs(im_pct_a - im_pct_b)
+    im_diff_color = "#64748B" if im_diff == 0.0 else "#D97706"
 
     with k4:
         st.markdown(
@@ -437,7 +462,8 @@ def render_cohort_comparison(
         <div class="kpi-card cohort-kpi-card" style="{card_style}">
             <div class="kpi-lbl" style="{lbl_style}">Intermediate Metabolizers (IM)</div>
             <div class="kpi-val" style="{val_style}">{im_pct_a:.1f}% vs {im_pct_b:.1f}%</div>
-            <div style="font-size: 12px; color: #D97706; margin-top: 2px;">Δ {abs(im_pct_a - im_pct_b):.1f}% difference</div>
+            <div style="font-size: 11px; color: #64748B; margin-top: 2px;">({im_count_a}/{n_a} vs {im_count_b}/{n_b} samples)</div>
+            <div style="font-size: 12px; color: {im_diff_color}; font-weight: 600; margin-top: 2px;">Δ {im_diff:.1f}% difference</div>
         </div>
         """,
             unsafe_allow_html=True,
