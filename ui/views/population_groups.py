@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from analysis_core import genotype_pca
+from core.pca import genotype_pca
 
 
 def render_population_groups(
