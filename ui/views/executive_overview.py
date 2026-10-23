@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-def render_executive_overview(full_results: dict, qc_report: dict, active_gene: str):
+def render_executive_overview(full_results: dict, qc_report: dict, active_gene: str, active_markers: list = None):
     """Renders executive overview KPIs, phenotype summaries, and cohort quality breakdown."""
     ov = full_results.get('overall', {})
     tot_samples = ov.get('sample_count', qc_report.get('total_samples', 0))
