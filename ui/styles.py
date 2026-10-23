@@ -140,13 +140,33 @@ CUSTOM_CSS = """
         margin-top: 0.3rem;
     }
 
-    /* Prevent Metric Text Truncation */
+    /* Clean Metric Value & Label Wrapping (Eliminates text overlap when shrinking page) */
+    div[data-testid="stMetric"] {
+        min-width: 0 !important;
+        overflow: hidden !important;
+    }
     div[data-testid="stMetricValue"],
-    div[data-testid="stMetricValue"] > div,
+    div[data-testid="stMetricValue"] > div {
+        font-family: Georgia, serif !important;
+        font-size: clamp(1.15rem, 2.2vw, 1.85rem) !important;
+        line-height: 1.2 !important;
+        white-space: normal !important;
+        overflow-wrap: break-word !important;
+        word-break: break-word !important;
+    }
+    div[data-testid="stMetricLabel"],
+    div[data-testid="stMetricLabel"] > div {
+        white-space: normal !important;
+        overflow-wrap: break-word !important;
+        word-break: break-word !important;
+        line-height: 1.3 !important;
+    }
+    div[data-testid="stMetricDelta"],
     div[data-testid="stMetricDelta"] > div {
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: unset !important;
+        white-space: normal !important;
+        overflow-wrap: break-word !important;
+        word-break: break-word !important;
+        line-height: 1.2 !important;
     }
 
     /* Data Tables & DataFrames */
@@ -284,19 +304,52 @@ CUSTOM_CSS = """
        4. MOBILE & TABLET RESPONSIVE MEDIA QUERIES (DEVICE COMPATIBILITY)
        ========================================================================= */
 
-    /* Tablet Landscape & Small Laptops (<= 1024px) */
+    /* Tablet Landscape, Laptops & Shrunk Windows (<= 1024px) */
     @media (max-width: 1024px) {
         .block-container,
         div[data-testid="stMainBlockContainer"] {
             padding-left: 1.25rem !important;
             padding-right: 1.25rem !important;
-            padding-top: 2rem !important;
+            padding-top: 1.8rem !important;
             padding-bottom: 3.5rem !important;
             max-width: 100% !important;
         }
 
         .kpi-val {
-            font-size: 1.6rem !important;
+            font-size: 1.5rem !important;
+        }
+
+        /* Responsive Column Wrapping: Prevents columns and cards from squishing and overlapping text */
+        div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: 8px !important;
+            width: 100% !important;
+        }
+
+        /* Default columns wrap cleanly into 50% width on shrunk viewports */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            min-width: calc(50% - 8px) !important;
+            flex: 1 1 calc(50% - 8px) !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Tables & charts stack into 100% full width to prevent column header overlap */
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stDataFrame"]) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stDataFrame"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stTable"]) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stTable"]) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(table) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(table) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(.js-plotly-plot) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(.js-plotly-plot) > div[data-testid="column"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stPlotlyChart"]) > div[data-testid="stColumn"],
+        div[data-testid="stHorizontalBlock"]:has(div[data-testid="stPlotlyChart"]) > div[data-testid="column"] {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+            margin-bottom: 0.6rem !important;
         }
     }
 
@@ -324,26 +377,6 @@ CUSTOM_CSS = """
         }
         h3 {
             font-size: clamp(1.05rem, 3.6vw, 1.25rem) !important;
-        }
-
-        /* =====================================================================
-           RESPONSIVE COLUMN WRAPPING FOR MOBILE / TABLET DEVICES
-           ===================================================================== */
-        /* Any multi-column horizontal block wraps naturally on mobile */
-        div[data-testid="stHorizontalBlock"] {
-            display: flex !important;
-            flex-wrap: wrap !important;
-            gap: 8px !important;
-            width: 100% !important;
-        }
-
-        /* Default columns on mobile: 50% width (perfect 2-per-row grid for cards & buttons) */
-        div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
-        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-            min-width: calc(50% - 8px) !important;
-            flex: 1 1 calc(50% - 8px) !important;
-            max-width: 100% !important;
-            box-sizing: border-box !important;
         }
 
         /* Content blocks with tables, dataframes, or plotly charts stack into 100% full width */
