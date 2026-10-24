@@ -10,7 +10,7 @@ import numpy as np
 from typing import Dict, Any, List, Optional
 import re
 
-from config import STATE_TO_REGION, CITY_TO_STATE, SNP_CONFIG, CYP2C9_SNP_CONFIG, GENE_TRANSLATION_RULES
+from config import STATE_TO_REGION, CITY_TO_STATE, FOREIGN_TO_REGION, SNP_CONFIG, CYP2C9_SNP_CONFIG, GENE_TRANSLATION_RULES
 from core.stats import GeneticStatsEngine
 from core.pgx_engine import RuleBasedPGxEngine
 
@@ -116,6 +116,9 @@ class DemographicStratifier:
             'north india': 'North India', 'south india': 'South India',
             'east india': 'East India', 'west india': 'West India',
             'central india': 'Central India',
+            'foreign / international': 'Foreign / International',
+            'international': 'Foreign / International',
+            'foreign': 'Foreign / International',
         }
         
         # 0. Check direct Region column match
@@ -128,14 +131,20 @@ class DemographicStratifier:
             # them into an India-specific catch-all.
             return re.sub(r'[\s\u00a0]+', ' ', region_raw).strip()
 
-        # 1. Direct match on State
+        # 1. Direct match on State / Country
         if state_raw in STATE_TO_REGION:
             return STATE_TO_REGION[state_raw]
             
         # 2. Case & whitespace insensitive match
-        state_title = state_raw.title()
+        state_lower = state_raw.lower()
+        if state_lower in FOREIGN_TO_REGION:
+            return FOREIGN_TO_REGION[state_lower]
+        for f_name, f_reg in FOREIGN_TO_REGION.items():
+            if f_name in state_lower:
+                return f_reg
+
         for k, v in STATE_TO_REGION.items():
-            if k.lower() == state_raw.lower():
+            if k.lower() == state_lower:
                 return v
 
         # 3. Accept an explicit standard region label in the State field.
@@ -148,7 +157,10 @@ class DemographicStratifier:
             if city in native_place_raw:
                 return STATE_TO_REGION.get(mapped_state, 'Unclassified / Other')
                 
-        # 5. Check if native place directly matches a state name
+        # 5. Check if native place directly matches a state or foreign country name
+        for f_name, f_reg in FOREIGN_TO_REGION.items():
+            if f_name in native_place_raw:
+                return f_reg
         for state_name, reg_name in STATE_TO_REGION.items():
             if state_name.lower() in native_place_raw:
                 return reg_name

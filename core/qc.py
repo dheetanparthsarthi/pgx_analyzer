@@ -142,8 +142,15 @@ class DataQCEngine:
             
         # Clean State & Native Place
         if 'State' in df.columns:
-            state_values = self._get_series(df, 'State').astype(str).str.strip()
-            df['State_Clean'] = state_values.mask(state_values.str.lower().isin({'', 'nan', 'none', 'null', '<na>', 'unknown'}), '')
+            state_raw_series = self._get_series(df, 'State')
+            state_values = state_raw_series.astype(str).str.replace('\xa0', ' ', regex=False).str.strip()
+            is_unclear_mask = (
+                state_raw_series.isna()
+                | state_values.str.lower().isin({'', 'nan', 'none', 'null', '<na>', 'unknown'})
+                | state_values.str.lower().str.contains('needs review', regex=False)
+                | (state_values.str.lower() == 'india')
+            )
+            df['State_Clean'] = state_values.mask(is_unclear_mask, '')
         else:
             df['State_Clean'] = ''
         df['Native_Place_Clean'] = self._get_series(df, 'Native_Place').astype(str).str.strip() if 'Native_Place' in df.columns else ''
@@ -328,7 +335,14 @@ class DataQCEngine:
             if is_name_bad:
                 reasons.append("Missing Patient Name")
             if is_state_bad:
-                reasons.append("Missing State")
+                raw_st_val = str(df.loc[i, 'State']).strip() if 'State' in df.columns and pd.notna(df.loc[i, 'State']) else ''
+                raw_st_lower = raw_st_val.lower()
+                if 'needs' in raw_st_lower and 'review' in raw_st_lower:
+                    reasons.append("Ambiguous State ('Needs review')")
+                elif raw_st_lower == 'india':
+                    reasons.append("Unspecified State ('India')")
+                else:
+                    reasons.append("Missing State")
             if marker_reasons:
                 reasons.extend(marker_reasons)
 

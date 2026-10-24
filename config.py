@@ -28,12 +28,15 @@ STATE_TO_REGION: Dict[str, str] = {
     'Uttarakhand': 'North India',
     'Himachal Pradesh': 'North India',
     'Delhi': 'North India',
+    'Delhi India': 'North India',
     'Chandigarh': 'North India',
     'Jammu & Kashmir': 'North India',
     'Jammu and Kashmir': 'North India',
     'Jammu Kashmir': 'North India',
     'Ladakh': 'North India',
     'Rajasthan': 'North India',
+    'Rajsthan': 'North India',
+    'Andhra Pradesh India': 'South India',
     
     # East India
     'Odisha': 'East India',
@@ -59,7 +62,60 @@ STATE_TO_REGION: Dict[str, str] = {
     
     # Central India
     'Madhya Pradesh': 'Central India',
-    'Chhattisgarh': 'Central India'
+    'Chhattisgarh': 'Central India',
+
+    # Foreign / International
+    'Bangladesh': 'Foreign / International',
+    'Saudi Arabia': 'Foreign / International',
+    'Calfornia': 'Foreign / International',
+    'California': 'Foreign / International',
+    'Mexico': 'Foreign / International',
+    'Nepal': 'Foreign / International',
+    'Germany': 'Foreign / International',
+    'Australia': 'Foreign / International',
+    'Thailand': 'Foreign / International',
+    'Indonesia': 'Foreign / International',
+    'Hungary': 'Foreign / International',
+    'Singapore': 'Foreign / International',
+    'United States': 'Foreign / International',
+    'Usa': 'Foreign / International',
+    'United Kingdom': 'Foreign / International',
+    'Uk': 'Foreign / International',
+    'Canada': 'Foreign / International',
+    'Uae': 'Foreign / International',
+    'Dubai': 'Foreign / International',
+    'Sri Lanka': 'Foreign / International',
+    'Pakistan': 'Foreign / International',
+    'Bhutan': 'Foreign / International',
+    'Myanmar': 'Foreign / International',
+    'Malaysia': 'Foreign / International'
+}
+
+FOREIGN_TO_REGION: Dict[str, str] = {
+    'bangladesh': 'Foreign / International',
+    'saudi arabia': 'Foreign / International',
+    'calfornia': 'Foreign / International',
+    'california': 'Foreign / International',
+    'mexico': 'Foreign / International',
+    'nepal': 'Foreign / International',
+    'germany': 'Foreign / International',
+    'australia': 'Foreign / International',
+    'thailand': 'Foreign / International',
+    'indonesia': 'Foreign / International',
+    'hungary': 'Foreign / International',
+    'singapore': 'Foreign / International',
+    'united states': 'Foreign / International',
+    'usa': 'Foreign / International',
+    'united kingdom': 'Foreign / International',
+    'uk': 'Foreign / International',
+    'canada': 'Foreign / International',
+    'uae': 'Foreign / International',
+    'dubai': 'Foreign / International',
+    'sri lanka': 'Foreign / International',
+    'pakistan': 'Foreign / International',
+    'bhutan': 'Foreign / International',
+    'myanmar': 'Foreign / International',
+    'malaysia': 'Foreign / International',
 }
 
 # City/District to State gazetteer for native place prediction when State is missing/ambiguous

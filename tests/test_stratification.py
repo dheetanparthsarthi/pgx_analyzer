@@ -65,5 +65,18 @@ def test_cyp2c9_stratification():
     assert 'CYP2C9*3' in results['markers']
     assert 'snps' in results['regional']['South India']
     assert 'CYP2C9*2' in results['regional']['South India']['snps']
-    assert 'pgx_summary' in results['regional']['South India']
     assert 'phenotypes' in results['regional']['South India']['pgx_summary']
+
+
+def test_foreign_international_stratification():
+    data = pd.DataFrame([
+        {'Sample_ID': 'S1', 'State_Clean': 'Nepal', 'CYP2C9*2': 'CC', 'CYP2C9*3': 'AA', 'Gender_Clean': 'Male'},
+        {'Sample_ID': 'S2', 'State_Clean': 'Germany', 'CYP2C9*2': 'CC', 'CYP2C9*3': 'AC', 'Gender_Clean': 'Female'},
+        {'Sample_ID': 'S3', 'State_Clean': 'Karnataka', 'CYP2C9*2': 'CT', 'CYP2C9*3': 'AA', 'Gender_Clean': 'Female'}
+    ])
+    results = DemographicStratifier.stratify_and_analyze(data, active_gene='CYP2C9')
+    assert 'Foreign / International' in results['regional']
+    assert results['regional']['Foreign / International']['sample_count'] == 2
+    assert 'South India' in results['regional']
+    assert results['regional']['South India']['sample_count'] == 1
+

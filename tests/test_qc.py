@@ -99,3 +99,35 @@ def test_mixed_type_sample_ids_with_missing_and_duplicates():
     assert report['samples_with_missing_count'] == 2
 
 
+def test_ambiguous_and_foreign_states_qc():
+    """Verify that 'Needs review' and generic 'India' are discarded as unclear, while Foreign countries are kept."""
+    data = {
+        'Sample_ID': ['S1', 'S2', 'S3', 'S4', 'S5'],
+        'Name': ['Alice', 'Bob', 'Charlie', 'David', 'Eva'],
+        'State': ['Needs review', 'Needs\xa0review', 'India', 'Nepal', 'Telangana'],
+        'CYP2C9*2': ['CC', 'CC', 'CC', 'CC', 'CC'],
+        'CYP2C9*3': ['AA', 'AA', 'AA', 'AA', 'AA']
+    }
+    df = pd.DataFrame(data)
+    qc_engine = DataQCEngine(df)
+    clean_df, report = qc_engine.run_qc()
+
+    # S1, S2, S3 should have empty State_Clean
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S1', 'State_Clean'].iloc[0] == ''
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S2', 'State_Clean'].iloc[0] == ''
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S3', 'State_Clean'].iloc[0] == ''
+
+    # S4 (Nepal) and S5 (Telangana) should be retained
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S4', 'State_Clean'].iloc[0] == 'Nepal'
+    assert clean_df.loc[clean_df['Sample_ID'] == 'S5', 'State_Clean'].iloc[0] == 'Telangana'
+
+    # Check discarded samples log
+    discarded_log = report['discarded_samples_log']
+    assert len(discarded_log) == 3
+    s1_entry = next(d for d in discarded_log if d['sample_id'] == 'S1')
+    assert "Needs review" in s1_entry['reasons']
+    s3_entry = next(d for d in discarded_log if d['sample_id'] == 'S3')
+    assert "India" in s3_entry['reasons']
+
+
+
