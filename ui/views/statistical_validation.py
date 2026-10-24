@@ -54,7 +54,7 @@ def render_statistical_validation(
     # -------------------------------------------------------------------------
     # 0. EXPERT MANUSCRIPT CONSULTATION & GUIDING PRINCIPLES BANNER
     # -------------------------------------------------------------------------
-    with st.expander("📖 Expert Consultation: How to Address Non-Significant Results (p ≥ 0.05) in Your Manuscript", expanded=False):
+    with st.expander("📖 Statistical Consultation: Understanding Non-Significant Results (p ≥ 0.05)", expanded=False):
         st.markdown(
             """
         <div style="background: #F8FAFC; border-left: 4px solid #3B82F6; padding: 14px 18px; border-radius: 6px; line-height: 1.6; font-size: 13px; color: #1E293B;">
@@ -260,7 +260,7 @@ def render_statistical_validation(
         st.markdown(
             f"""
         <div style="background: #F0FDF4; border: 1px solid #86EFAC; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #166534; margin-top: 6px;">
-            <b>📄 Manuscript Draft Citation:</b><br>
+            <b>📊 Statistical Summary & Biological Interpretation:</b><br>
             {'<br>'.join(manuscript_sentences)}
         </div>
         """,
@@ -586,12 +586,12 @@ def render_statistical_validation(
     st.markdown("<br>", unsafe_allow_html=True)
 
     # -------------------------------------------------------------------------
-    # 8. AUTOMATED MANUSCRIPT ABSTRACT & READY-TO-PUBLISH CONCLUSIONS
+    # 8. COMPREHENSIVE STUDY SUMMARY & CORE FINDINGS
     # -------------------------------------------------------------------------
-    st.markdown("#### 📝 Automated Manuscript Abstract & Key Scientific Outcomes")
+    st.markdown("#### 📝 Comprehensive Study Summary & Core Scientific Findings")
     st.caption(
         "Synthesizes your cohort's population genetics, Hardy-Weinberg equilibrium, and clinical actionability into "
-        "ready-to-publish conclusions formatted for peer-reviewed journal submission."
+        "comprehensive summary findings compliant with STREGA and CPIC guidelines."
     )
 
     # Calculate dynamic allele summary strings
@@ -621,7 +621,7 @@ Conclusion: In one of the largest pan-Indian pharmacogenomic analyses of {active
         f"""
     <div style="background: #F8FAFC; border: 1.5px solid #3B82F6; border-radius: 8px; padding: 18px 20px; line-height: 1.6;">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-            <div style="font-weight: 800; color: #1E40AF; font-size: 15px;">📄 Publication-Ready Abstract Text (STREGA & CPIC Standard)</div>
+            <div style="font-weight: 800; color: #1E40AF; font-size: 15px;">📄 Comprehensive Study Summary (STREGA & CPIC Standard)</div>
             <div style="font-size: 11px; background: #DBEAFE; color: #1D4ED8; padding: 3px 8px; border-radius: 4px; font-weight: 700;">Copy-Paste Ready</div>
         </div>
         <div style="font-size: 13px; color: #1E293B; white-space: pre-line; background: #FFFFFF; border: 1px solid #E2E8F0; padding: 14px 16px; border-radius: 6px; font-family: inherit;">
