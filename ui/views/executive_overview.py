@@ -24,15 +24,22 @@ def render_executive_overview(full_results: dict, qc_report: dict, active_gene: 
     total_input = full_results.get('total_input_samples', qc_report.get('total_samples', tot_samples))
 
     st.markdown('<div class="metric-row-anchor"></div>', unsafe_allow_html=True)
-    k1, k2, k3, k4, k5 = st.columns([1, 1, 1.35, 0.9, 1.05])
+    k1, k2, k3, k4, k5 = st.columns([1.1, 1.1, 1.1, 0.9, 1.05])
     if discarded_null > 0:
-        k1.metric("ANALYZED SAMPLES", f"{tot_samples:,}", f"-{discarded_null} null discarded", delta_color="inverse")
+        k1.metric("ANALYZED SAMPLES", f"{tot_samples:,}", f"-{discarded_null} discarded", delta_color="inverse")
     else:
         k1.metric("ANALYZED SAMPLES", f"{tot_samples:,}")
-    k2.metric("FULLY VALID", f"{fully_valid:,}")
-    k3.metric("MISSING CALLS", f"{missing_pct:.1f}%", f"{missing_count:,} samples", delta_color="off")
+    k2.metric("TOTAL UPLOADED", f"{total_input:,}")
+    k3.metric("DISCARDED (ANY NULL)", f"{discarded_null:,}")
     k4.metric("DUPLICATE IDS", dup_count)
     k5.metric("INVALID GENOTYPES", invalid_count)
+
+    if discarded_null > 0:
+        st.info(
+            f"🛡️ **Strict Quality Rule Active**: Evaluated **{total_input:,}** uploaded records across **Sample ID, Patient Name, State, and Gene Markers**. "
+            f"**{tot_samples:,} complete samples** were analyzed. **{discarded_null:,} row(s)** with null/missing values in any of these fields were discarded from calculations. "
+            f"Review the full record-level log in the **🛡️ Data Quality Audit** tab."
+        )
 
     if dup_ids:
         st.markdown(f"""

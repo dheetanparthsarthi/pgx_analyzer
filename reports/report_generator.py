@@ -104,23 +104,33 @@ class ReportGenerator:
         output = io.BytesIO()
         active_gene = full_results.get('active_gene') or full_results.get('target_gene') or 'CYP2C19'
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            used_sheet_names = set()
+
+            def get_unique_sheet_name(name_candidate: str) -> str:
+                clean_name = "".join([c for c in str(name_candidate) if c.isalnum() or c in [' ', '_']]).strip()
+                base = clean_name.replace(' ', '_')[:28] if clean_name else "Sheet"
+                title = base
+                counter = 1
+                while title.lower() in used_sheet_names:
+                    title = f"{base[:24]}_{counter}"
+                    counter += 1
+                used_sheet_names.add(title.lower())
+                return title
+
             # 1. Full Dataset Tab
             if 'processed_dataframe' in full_results:
                 full_df = full_results['processed_dataframe']
-                full_df.to_excel(writer, sheet_name='Full Cleaned Dataset', index=False)
+                full_df.to_excel(writer, sheet_name=get_unique_sheet_name('Full Cleaned Dataset'), index=False)
                 
             # 2. Overall Population Tab
             if 'overall' in full_results:
                 ov_df = cls._dict_to_summary_table(full_results['overall'])
-                ov_df.to_excel(writer, sheet_name='Overall Population', index=False)
+                ov_df.to_excel(writer, sheet_name=get_unique_sheet_name('Overall Population'), index=False)
                 
             # 3. Regional Tabs (North, South, East, West)
             regional_results = full_results.get('regional', {})
             for reg_name, reg_data in regional_results.items():
-                safe_reg_name = "".join([c for c in str(reg_name) if c.isalnum() or c in [' ', '_']]).strip()
-                sheet_title = safe_reg_name.replace(' ', '_')[:31]  # Excel 31 char sheet limit
-                if not sheet_title:
-                    sheet_title = "Region"
+                sheet_title = get_unique_sheet_name(reg_name)
                 reg_df = cls._dict_to_summary_table(reg_data)
                 reg_df.to_excel(writer, sheet_name=sheet_title, index=False)
                 

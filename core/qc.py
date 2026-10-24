@@ -235,6 +235,114 @@ class DataQCEngine:
         problematic_samples = set(all_duplicates) | samples_with_missing_genotypes | samples_with_invalid_genotypes
         fully_valid_samples = max(0, total_input_samples - len(problematic_samples))
 
+        # 4-Field Completeness Audit & Discarded Samples Tracking
+        # 1. Sample ID Missing
+        missing_sid_mask = [
+            pd.isna(s) or str(s).strip().lower() in ('', 'nan', 'none', 'null')
+            for s in raw_sids
+        ]
+        missing_sid_count = int(sum(missing_sid_mask))
+
+        # 2. Patient Name Missing
+        name_col = next((c for c in df.columns if c.lower() == 'name' or 'name' in c.lower()), None)
+        if name_col:
+            name_series = self._get_series(df, name_col)
+            missing_name_mask = [
+                pd.isna(n) or str(n).strip().lower() in ('', 'nan', 'none', 'null')
+                for n in name_series
+            ]
+            missing_name_count = int(sum(missing_name_mask))
+        else:
+            missing_name_mask = [False] * total_input_samples
+            missing_name_count = 0
+
+        # 3. State Missing
+        state_clean_series = df.get('State_Clean', pd.Series([''] * total_input_samples))
+        missing_state_mask = [
+            pd.isna(st) or str(st).strip().lower() in ('', 'nan', 'none', 'null')
+            for st in state_clean_series
+        ]
+        missing_state_count = int(sum(missing_state_mask))
+
+        # 4. Target Marker Missing
+        missing_markers_count = len(samples_with_missing_genotypes)
+
+        completeness_audit = [
+            {
+                'field': 'Sample ID',
+                'description': 'Unique Patient Identifier',
+                'total': total_input_samples,
+                'missing': missing_sid_count,
+                'valid': total_input_samples - missing_sid_count,
+                'completion_pct': round(((total_input_samples - missing_sid_count) / total_input_samples) * 100, 1) if total_input_samples else 100.0,
+                'status': 'PASS' if missing_sid_count == 0 else f'FLAGGED ({missing_sid_count} missing)'
+            },
+            {
+                'field': 'Patient Name',
+                'description': 'Subject Full Name' if name_col else 'Not Mapped in Dataset',
+                'total': total_input_samples,
+                'missing': missing_name_count,
+                'valid': total_input_samples - missing_name_count,
+                'completion_pct': round(((total_input_samples - missing_name_count) / total_input_samples) * 100, 1) if total_input_samples else 100.0,
+                'status': 'PASS' if missing_name_count == 0 else f'FLAGGED ({missing_name_count} missing)'
+            },
+            {
+                'field': 'State (Demographic)',
+                'description': 'Indian State of Origin',
+                'total': total_input_samples,
+                'missing': missing_state_count,
+                'valid': total_input_samples - missing_state_count,
+                'completion_pct': round(((total_input_samples - missing_state_count) / total_input_samples) * 100, 1) if total_input_samples else 100.0,
+                'status': 'PASS' if missing_state_count == 0 else f'FLAGGED ({missing_state_count} missing)'
+            },
+            {
+                'field': 'Genetic Markers (Genotypes)',
+                'description': f"Target Panel ({', '.join(target_cols)})" if target_cols else 'Genotype Calls',
+                'total': total_input_samples,
+                'missing': missing_markers_count,
+                'valid': total_input_samples - missing_markers_count,
+                'completion_pct': round(((total_input_samples - missing_markers_count) / total_input_samples) * 100, 1) if total_input_samples else 100.0,
+                'status': 'PASS' if missing_markers_count == 0 else f'FLAGGED ({missing_markers_count} missing)'
+            }
+        ]
+
+        # Row-by-row Discarded Samples Log
+        discarded_samples_log = []
+        for i in range(total_input_samples):
+            sid = str(df.loc[i, 'Sample_ID']).strip()
+            is_sid_bad = missing_sid_mask[i]
+            is_name_bad = missing_name_mask[i]
+            is_state_bad = missing_state_mask[i]
+
+            marker_reasons = []
+            row_marker_calls = {}
+            for col_name in target_cols:
+                c_val = df.loc[i, col_name] if col_name in df.columns else np.nan
+                row_marker_calls[col_name] = str(c_val) if pd.notna(c_val) else 'Missing'
+                if pd.isna(c_val) or str(c_val).strip().upper() in ('', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING', 'UNKNOWN'):
+                    marker_reasons.append(f"Missing {col_name}")
+
+            reasons = []
+            if is_sid_bad:
+                reasons.append("Missing Sample ID")
+            if is_name_bad:
+                reasons.append("Missing Patient Name")
+            if is_state_bad:
+                reasons.append("Missing State")
+            if marker_reasons:
+                reasons.extend(marker_reasons)
+
+            if reasons:
+                name_val = str(df.loc[i, name_col]).strip() if name_col and pd.notna(df.loc[i, name_col]) else 'N/A'
+                raw_st = str(df.loc[i, 'State']).strip() if 'State' in df.columns and pd.notna(df.loc[i, 'State']) else 'Missing'
+                discarded_samples_log.append({
+                    'sample_id': sid,
+                    'name': name_val,
+                    'state': raw_st,
+                    'reasons': '; '.join(reasons),
+                    'marker_calls': row_marker_calls
+                })
+
         self.clean_df = df
         self.qc_report = {
             'total_samples': total_input_samples,
@@ -247,7 +355,14 @@ class DataQCEngine:
             'samples_with_missing_ids': sorted([str(s) for s in samples_with_missing_genotypes], key=lambda x: str(x)),
             'invalid_genotypes_count': total_invalid_calls,
             'invalid_genotypes_log': invalid_genotypes_log,
-            'snp_qc_stats': snp_qc_stats
+            'snp_qc_stats': snp_qc_stats,
+            'completeness_audit': completeness_audit,
+            'discarded_samples_count': len(discarded_samples_log),
+            'discarded_samples_log': discarded_samples_log,
+            'missing_sid_count': missing_sid_count,
+            'missing_name_count': missing_name_count,
+            'missing_state_count': missing_state_count,
+            'missing_markers_count': missing_markers_count,
         }
         
         return self.clean_df, self.qc_report

@@ -142,18 +142,44 @@ def run_fast_pipeline(
             )
         ]
 
-    if target_markers and not clean_df.empty:
-        valid_mask = clean_df[target_markers].notna().all(axis=1)
-        discarded_null_count = int((~valid_mask).sum())
-        qc_report["discarded_null_samples"] = discarded_null_count
-        qc_report["total_analyzed_samples"] = int(valid_mask.sum())
-        analyzed_df = (
-            clean_df[valid_mask].copy() if valid_mask.any() else clean_df.copy()
+    # Strict Complete-Case Row Filtering:
+    # A row is kept ONLY if:
+    # 1. Sample_ID is non-null
+    # 2. Patient Name (if present in dataset) is non-null
+    # 3. State (State_Clean) is non-null
+    # 4. All target gene markers are non-null
+    valid_sid_mask = clean_df["Sample_ID"].astype(str).str.strip().ne("") & ~clean_df["Sample_ID"].astype(str).str.lower().isin(["nan", "null", "none"])
+
+    name_col = next((c for c in clean_df.columns if c.lower() == "name" or "name" in c.lower()), None)
+    if name_col:
+        valid_name_mask = clean_df[name_col].notna() & clean_df[name_col].astype(str).str.strip().ne("") & ~clean_df[name_col].astype(str).str.lower().isin(["nan", "null", "none"])
+    else:
+        valid_name_mask = pd.Series(True, index=clean_df.index)
+
+    if "State_Clean" in clean_df.columns:
+        valid_state_mask = (
+            clean_df["State_Clean"].notna()
+            & clean_df["State_Clean"].astype(str).str.strip().ne("")
+            & ~clean_df["State_Clean"].astype(str).str.lower().isin(["nan", "null", "none"])
         )
     else:
-        analyzed_df = clean_df.copy()
-        qc_report["discarded_null_samples"] = 0
-        qc_report["total_analyzed_samples"] = len(clean_df)
+        valid_state_mask = pd.Series(True, index=clean_df.index)
+
+    if target_markers:
+        valid_markers_mask = clean_df[target_markers].notna().all(axis=1)
+    else:
+        valid_markers_mask = pd.Series(True, index=clean_df.index)
+
+    complete_row_mask = valid_sid_mask & valid_name_mask & valid_state_mask & valid_markers_mask
+    discarded_count = int((~complete_row_mask).sum())
+    analyzed_count = int(complete_row_mask.sum())
+
+    qc_report["discarded_null_samples"] = discarded_count
+    qc_report["total_analyzed_samples"] = analyzed_count
+
+    analyzed_df = (
+        clean_df[complete_row_mask].copy() if complete_row_mask.any() else clean_df.copy()
+    )
 
     full_results = DemographicStratifier.stratify_and_analyze(
         analyzed_df,
@@ -161,12 +187,13 @@ def run_fast_pipeline(
         active_gene=active_gene,
         custom_translation_rules=translation_rules,
     )
-    full_results["discarded_null_samples"] = qc_report.get(
-        "discarded_null_samples", 0
-    )
+    full_results["discarded_null_samples"] = discarded_count
     full_results["total_input_samples"] = qc_report.get(
         "total_samples", len(clean_df)
     )
+    full_results["total_analyzed_samples"] = analyzed_count
+    full_results["discarded_samples_log"] = qc_report.get("discarded_samples_log", [])
+    full_results["completeness_audit"] = qc_report.get("completeness_audit", [])
     return clean_df, qc_report, full_results
 
 
