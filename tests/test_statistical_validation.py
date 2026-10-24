@@ -25,6 +25,11 @@ def test_calculate_odds_ratio_haldane():
     assert res_zero['ci_upper'] > res_zero['ci_lower']
     assert 0.0 <= res_zero['p_value'] <= 1.0
 
+    # Zero cases in both cohorts (0/110 vs 0/9)
+    res_both_zero = GeneticStatsEngine.calculate_odds_ratio_haldane(0, 110, 0, 9)
+    assert res_both_zero['is_uninformative'] is True
+    assert res_both_zero['p_value'] == 1.0
+
 
 def test_calculate_wilson_ci():
     # 50 variant alleles out of 1000 total alleles

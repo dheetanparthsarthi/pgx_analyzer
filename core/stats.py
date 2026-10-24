@@ -250,6 +250,20 @@ class GeneticStatsEngine:
         except Exception:
             fisher_p = 1.0
 
+        # If zero events occur across both groups or zero controls across both groups,
+        # the Odds Ratio is mathematically uninformative/undefined.
+        if (a == 0 and c == 0) or (b == 0 and d == 0) or (a + b == 0) or (c + d == 0):
+            return {
+                'odds_ratio': 1.0,
+                'ci_lower': 1.0,
+                'ci_upper': 1.0,
+                'p_value': 1.0,
+                'se': 0.0,
+                'haldane_applied': False,
+                'is_uninformative': True,
+                'table': table_raw
+            }
+
         haldane_applied = (a == 0 or b == 0 or c == 0 or d == 0)
         adj_a = a + (0.5 if haldane_applied else 0.0)
         adj_b = b + (0.5 if haldane_applied else 0.0)
@@ -274,6 +288,7 @@ class GeneticStatsEngine:
             'p_value': round(fisher_p, 4),
             'se': round(se_ln_or, 4),
             'haldane_applied': haldane_applied,
+            'is_uninformative': False,
             'table': table_raw
         }
 

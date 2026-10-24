@@ -216,6 +216,7 @@ def render_statistical_validation(
                     "Cells < 5 (%)": f"{mc_res['pct_cells_below_5']:.1f}%",
                     "Regional Divergence": "⚠️ Significant Divergence" if mc_res["p_monte_carlo"] < 0.05 else "✅ Homogeneous (No Divergence)",
                 }
+            )
     if omni_rows:
         st.dataframe(pd.DataFrame(omni_rows), use_container_width=True, hide_index=True)
 

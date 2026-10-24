@@ -445,9 +445,14 @@ def render_cohort_comparison(
     )
 
     with k3:
-        small_n_pm_badge = ""
-        if min(n_a, n_b) < 30 and pm_power < 0.80:
-            small_n_pm_badge = f'<div style="font-size: 10px; color: #B45309; background: #FEF3C7; padding: 2px 6px; border-radius: 4px; margin-top: 4px; font-weight: 600;">⚠️ Small Cohort (n={min(n_a, n_b)}) · Power: {pm_power*100:.1f}%</div>'
+        if pm_or_stats.get("is_uninformative") or (pm_count_a == 0 and pm_count_b == 0):
+            pm_or_text = "OR: — (0 cases in both cohorts)"
+            small_n_pm_badge = '<div style="font-size: 10px; color: #64748B; background: #F1F5F9; padding: 2px 6px; border-radius: 4px; margin-top: 4px; font-weight: 500;">ℹ️ 0 cases in both cohorts</div>'
+        else:
+            pm_or_text = f"OR: {pm_or_stats['odds_ratio']:.2f} [{pm_or_stats['ci_lower']:.2f}–{pm_or_stats['ci_upper']:.2f}]"
+            small_n_pm_badge = ""
+            if min(n_a, n_b) < 30 and pm_power < 0.80:
+                small_n_pm_badge = f'<div style="font-size: 10px; color: #B45309; background: #FEF3C7; padding: 2px 6px; border-radius: 4px; margin-top: 4px; font-weight: 600;">⚠️ Small Cohort (n={min(n_a, n_b)}) · Power: {pm_power*100:.1f}%</div>'
 
         st.markdown(
             f"""
@@ -456,7 +461,7 @@ def render_cohort_comparison(
             <div class="kpi-val" style="{val_style}">{pm_pct_a:.1f}% vs {pm_pct_b:.1f}%</div>
             <div style="font-size: 11px; color: #64748B; margin-top: 2px;">({pm_count_a}/{n_a} vs {pm_count_b}/{n_b} samples)</div>
             <div style="font-size: 12px; color: {pm_diff_color}; font-weight: 600; margin-top: 2px;">Δ {pm_diff:.1f}% · Fisher p={pm_or_stats['p_value']:.4f}</div>
-            <div style="font-size: 11px; color: #475569; margin-top: 2px;">OR: {pm_or_stats['odds_ratio']:.2f} [{pm_or_stats['ci_lower']:.2f}–{pm_or_stats['ci_upper']:.2f}]</div>
+            <div style="font-size: 11px; color: #475569; margin-top: 2px;">{pm_or_text}</div>
             {small_n_pm_badge}
         </div>
         """,
@@ -496,9 +501,14 @@ def render_cohort_comparison(
     )
 
     with k4:
-        small_n_im_badge = ""
-        if min(n_a, n_b) < 30 and im_power < 0.80:
-            small_n_im_badge = f'<div style="font-size: 10px; color: #B45309; background: #FEF3C7; padding: 2px 6px; border-radius: 4px; margin-top: 4px; font-weight: 600;">⚠️ Small Cohort (n={min(n_a, n_b)}) · Power: {im_power*100:.1f}%</div>'
+        if im_or_stats.get("is_uninformative") or (im_count_a == 0 and im_count_b == 0):
+            im_or_text = "OR: — (0 cases in both cohorts)"
+            small_n_im_badge = '<div style="font-size: 10px; color: #64748B; background: #F1F5F9; padding: 2px 6px; border-radius: 4px; margin-top: 4px; font-weight: 500;">ℹ️ 0 cases in both cohorts</div>'
+        else:
+            im_or_text = f"OR: {im_or_stats['odds_ratio']:.2f} [{im_or_stats['ci_lower']:.2f}–{im_or_stats['ci_upper']:.2f}]"
+            small_n_im_badge = ""
+            if min(n_a, n_b) < 30 and im_power < 0.80:
+                small_n_im_badge = f'<div style="font-size: 10px; color: #B45309; background: #FEF3C7; padding: 2px 6px; border-radius: 4px; margin-top: 4px; font-weight: 600;">⚠️ Small Cohort (n={min(n_a, n_b)}) · Power: {im_power*100:.1f}%</div>'
 
         st.markdown(
             f"""
@@ -507,7 +517,7 @@ def render_cohort_comparison(
             <div class="kpi-val" style="{val_style}">{im_pct_a:.1f}% vs {im_pct_b:.1f}%</div>
             <div style="font-size: 11px; color: #64748B; margin-top: 2px;">({im_count_a}/{n_a} vs {im_count_b}/{n_b} samples)</div>
             <div style="font-size: 12px; color: {im_diff_color}; font-weight: 600; margin-top: 2px;">Δ {im_diff:.1f}% · Fisher p={im_or_stats['p_value']:.4f}</div>
-            <div style="font-size: 11px; color: #475569; margin-top: 2px;">OR: {im_or_stats['odds_ratio']:.2f} [{im_or_stats['ci_lower']:.2f}–{im_or_stats['ci_upper']:.2f}]</div>
+            <div style="font-size: 11px; color: #475569; margin-top: 2px;">{im_or_text}</div>
             {small_n_im_badge}
         </div>
         """,
@@ -654,7 +664,12 @@ def render_cohort_comparison(
         or_val = stat_res['odds_ratio']
         ci_l = stat_res['ci_lower']
         ci_u = stat_res['ci_upper']
-        ci_str = f"{or_val:.2f} [{ci_l:.2f}–{ci_u:.2f}]" if ci_u < 1000 else f"{or_val:.2f}"
+        if stat_res.get('is_uninformative') or (cnt_a == 0 and cnt_b == 0):
+            ci_str = "— (0 cases)"
+        elif ci_u < 1000:
+            ci_str = f"{or_val:.2f} [{ci_l:.2f}–{ci_u:.2f}]"
+        else:
+            ci_str = f"{or_val:.2f}"
         sig_str = "⚠️ Significant (p < 0.05)" if p_val < 0.05 else "Not Significant"
 
         pheno_rows.append(
