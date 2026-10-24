@@ -16,6 +16,7 @@ def render_column_mapping(df_raw: pd.DataFrame) -> None:
     # -------------------------------------------------------------------------
     # 1. CASCADE DROPDOWNS: SELECT GENE FIRST, THEN SELECT MARKER(S)
     # -------------------------------------------------------------------------
+    catalog_df = load_marker_catalog()
     catalog_genes = sorted(catalog_df['Gene'].unique()) if not catalog_df.empty else []
     custom_genes = st.session_state.get('custom_genes', [])
     all_catalog_genes = sorted(list(set(catalog_genes + custom_genes)))
