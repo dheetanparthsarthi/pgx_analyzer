@@ -46,6 +46,7 @@ class DataQCEngine:
             if raw_col in df.columns and target_col and target_col != "(None)":
                 col_mapping[raw_col] = target_col
         
+        has_explicit_sample_id = any('sample' in str(c).lower() and 'id' in str(c).lower() for c in df.columns)
         for col in df.columns:
             if col in col_mapping:
                 continue
@@ -70,7 +71,7 @@ class DataQCEngine:
             elif 'sample' in col_lower and 'id' in col_lower:
                 col_mapping[col] = 'Sample_ID'
             elif 'lab' in col_lower and 'id' in col_lower:
-                col_mapping[col] = 'Sample_ID'
+                col_mapping[col] = 'Lab_ID' if has_explicit_sample_id else 'Sample_ID'
             elif 'patient' in col_lower and 'id' in col_lower:
                 col_mapping[col] = 'Sample_ID'
             elif col_lower == 'id':
@@ -274,6 +275,9 @@ class DataQCEngine:
         # 4. Target Marker Missing
         missing_markers_count = len(samples_with_missing_genotypes)
 
+        # 5. Duplicate Sample ID Check
+        duplicate_sample_count = len(duplicated_in_file)
+
         completeness_audit = [
             {
                 'field': 'Sample ID',
@@ -283,6 +287,15 @@ class DataQCEngine:
                 'valid': total_input_samples - missing_sid_count,
                 'completion_pct': round(((total_input_samples - missing_sid_count) / total_input_samples) * 100, 1) if total_input_samples else 100.0,
                 'status': 'PASS' if missing_sid_count == 0 else f'FLAGGED ({missing_sid_count} missing)'
+            },
+            {
+                'field': 'Sample ID Uniqueness',
+                'description': f"Cohort Deduplication ({len(all_duplicates)} duplicates found: {', '.join(all_duplicates) if all_duplicates else 'None'})",
+                'total': total_input_samples,
+                'missing': duplicate_sample_count,
+                'valid': total_input_samples - duplicate_sample_count,
+                'completion_pct': round(((total_input_samples - duplicate_sample_count) / total_input_samples) * 100, 1) if total_input_samples else 100.0,
+                'status': 'PASS' if duplicate_sample_count == 0 else f'FLAGGED ({duplicate_sample_count} duplicate discarded)'
             },
             {
                 'field': 'Patient Name',
@@ -295,7 +308,7 @@ class DataQCEngine:
             },
             {
                 'field': 'State (Demographic)',
-                'description': 'Indian State of Origin',
+                'description': 'Indian State of Origin or Foreign Country',
                 'total': total_input_samples,
                 'missing': missing_state_count,
                 'valid': total_input_samples - missing_state_count,
@@ -314,10 +327,12 @@ class DataQCEngine:
         ]
 
         # Row-by-row Discarded Samples Log
+        is_duplicate_mask = df['Sample_ID'].duplicated(keep='first').tolist()
         discarded_samples_log = []
         for i in range(total_input_samples):
             sid = str(df.loc[i, 'Sample_ID']).strip()
             is_sid_bad = missing_sid_mask[i]
+            is_dup_bad = is_duplicate_mask[i]
             is_name_bad = missing_name_mask[i]
             is_state_bad = missing_state_mask[i]
 
@@ -332,6 +347,8 @@ class DataQCEngine:
             reasons = []
             if is_sid_bad:
                 reasons.append("Missing Sample ID")
+            elif is_dup_bad:
+                reasons.append("Duplicate Sample ID (Second occurrence discarded)")
             if is_name_bad:
                 reasons.append("Missing Patient Name")
             if is_state_bad:

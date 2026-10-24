@@ -142,13 +142,17 @@ def run_fast_pipeline(
             )
         ]
 
-    # Strict Complete-Case Row Filtering:
+    # Strict Complete-Case Row Filtering & Deduplication:
     # A row is kept ONLY if:
-    # 1. Sample_ID is non-null
+    # 1. Sample_ID is non-null and strictly unique (duplicate rows discarded)
     # 2. Patient Name (if present in dataset) is non-null
     # 3. State (State_Clean) is non-null
     # 4. All target gene markers are non-null
-    valid_sid_mask = clean_df["Sample_ID"].astype(str).str.strip().ne("") & ~clean_df["Sample_ID"].astype(str).str.lower().isin(["nan", "null", "none"])
+    valid_sid_mask = (
+        clean_df["Sample_ID"].astype(str).str.strip().ne("")
+        & ~clean_df["Sample_ID"].astype(str).str.lower().isin(["nan", "null", "none"])
+        & ~clean_df["Sample_ID"].duplicated(keep="first")
+    )
 
     name_col = next((c for c in clean_df.columns if c.lower() == "name" or "name" in c.lower()), None)
     if name_col:
