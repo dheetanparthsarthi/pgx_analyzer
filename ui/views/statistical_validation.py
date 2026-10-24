@@ -51,28 +51,6 @@ def render_statistical_validation(
         "and CPIC publication guidelines. Designed specifically to resolve rare genotypes and unequal sample size constraints."
     )
 
-    # -------------------------------------------------------------------------
-    # 0. EXPERT MANUSCRIPT CONSULTATION & GUIDING PRINCIPLES BANNER
-    # -------------------------------------------------------------------------
-    with st.expander("📖 Statistical Consultation: Understanding Non-Significant Results (p ≥ 0.05)", expanded=False):
-        st.markdown(
-            """
-        <div style="background: #F8FAFC; border-left: 4px solid #3B82F6; padding: 14px 18px; border-radius: 6px; line-height: 1.6; font-size: 13px; color: #1E293B;">
-            <div style="font-weight: 700; font-size: 14px; color: #1E40AF; margin-bottom: 6px;">
-                💡 The Golden Rule of Population Pharmacogenomics
-            </div>
-            <b>Never manipulate cohorts or run arbitrary combinations to force p &lt; 0.05.</b> 
-            A non-significant result (p ≥ 0.05) across geographic regions or genders is a <b>completely valid, scientifically valuable, and publishable finding</b>.
-            <ul style="margin-top: 6px; margin-bottom: 8px;">
-                <li><b>Biological Reality:</b> Non-significant divergence across Indian regional zones demonstrates that <i>CYP2C9*2</i> and <i>*3</i> are <b>homogeneously distributed across India</b>. This proves pan-Indian genetic conservation and scientifically supports a <b>unified national CPIC dosing policy</b> rather than fragmented state-by-state guidelines.</li>
-                <li><b>Unequal Sample Sizes:</b> If one region (e.g., South India, N=375) is much larger than another (e.g., Central India, N=7 or West India, N=17), statistical power is inherently low. Reporting post-hoc power and Odds Ratios with 95% Confidence Intervals satisfies peer reviewers completely.</li>
-                <li><b>The Dominant / Carrier Model Solution:</b> Rare homozygous variants (like <code>TT</code> for *2 or <code>CC</code> for *3) often have counts &lt; 5, violating asymptotic Chi-square assumptions. Collapsing into a <b>Carrier Model (Wildtype vs. Carriers)</b> creates robust 2×2 tables analyzed via <b>Fisher's Exact Test</b>.</li>
-            </ul>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
-
     # Extract overall and regional data
     overall_stats = full_results.get("overall", {})
     regional_dict = full_results.get("regional", {})
@@ -194,7 +172,6 @@ def render_statistical_validation(
     )
 
     omni_rows = []
-    manuscript_sentences = []
 
     for marker in active_markers:
         all_configs = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
@@ -239,33 +216,8 @@ def render_statistical_validation(
                     "Cells < 5 (%)": f"{mc_res['pct_cells_below_5']:.1f}%",
                     "Regional Divergence": "⚠️ Significant Divergence" if mc_res["p_monte_carlo"] < 0.05 else "✅ Homogeneous (No Divergence)",
                 }
-            )
-
-            p_val_to_cite = mc_res["p_monte_carlo"]
-            chi2_to_cite = mc_res["chi2_stat"]
-            df_to_cite = mc_res["df"]
-            if p_val_to_cite >= 0.05:
-                manuscript_sentences.append(
-                    f"“A global test of heterogeneity across the five Indian geographic regions revealed no significant divergence in {marker} carrier distribution (Monte Carlo χ² = {chi2_to_cite:.2f}, df = {df_to_cite}, p = {p_val_to_cite:.4f}), establishing pan-Indian genetic conservation.”"
-                )
-            else:
-                manuscript_sentences.append(
-                    f"“A global test of heterogeneity across the five Indian geographic regions detected significant regional variation in {marker} carrier distribution (Monte Carlo χ² = {chi2_to_cite:.2f}, df = {df_to_cite}, p = {p_val_to_cite:.4f}).”"
-                )
-
     if omni_rows:
         st.dataframe(pd.DataFrame(omni_rows), use_container_width=True, hide_index=True)
-
-    if manuscript_sentences:
-        st.markdown(
-            f"""
-        <div style="background: #F0FDF4; border: 1px solid #86EFAC; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #166534; margin-top: 6px;">
-            <b>📊 Statistical Summary & Biological Interpretation:</b><br>
-            {'<br>'.join(manuscript_sentences)}
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -583,52 +535,4 @@ def render_statistical_validation(
     else:
         st.info(f"No 1000 Genomes SAS reference benchmark configured for {active_gene}.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # -------------------------------------------------------------------------
-    # 8. COMPREHENSIVE STUDY SUMMARY & CORE FINDINGS
-    # -------------------------------------------------------------------------
-    st.markdown("#### 📝 Comprehensive Study Summary & Core Scientific Findings")
-    st.caption(
-        "Synthesizes your cohort's population genetics, Hardy-Weinberg equilibrium, and clinical actionability into "
-        "comprehensive summary findings compliant with STREGA and CPIC guidelines."
-    )
-
-    # Calculate dynamic allele summary strings
-    al_summary_parts = []
-    for m in active_markers:
-        snps_m = overall_stats.get("snps", {}).get(m, {})
-        al_c = snps_m.get("allele_counts", {})
-        tot_al = sum(al_c.values())
-        all_cfg = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
-        v_al = all_cfg.get(m, {}).get("var_allele")
-        if not v_al and al_c:
-            sorted_al = sorted(al_c.items(), key=lambda x: x[1])
-            v_al = sorted_al[0][0]
-        maf_pct = (al_c.get(v_al, 0) / tot_al * 100.0) if tot_al > 0 else 0.0
-        al_summary_parts.append(f"{m} ({maf_pct:.1f}%)")
-    al_summary_str = ", ".join(al_summary_parts) if al_summary_parts else f"{active_gene} variants"
-
-    abstract_text = f"""Background & Objective: Pharmacogenomic variation in {active_gene} critically governs drug efficacy and adverse drug reaction risks for narrow-therapeutic-index substrates. This study comprehensively evaluated the distribution, Hardy–Weinberg equilibrium (HWE), linkage disequilibrium, and clinical actionability of {active_gene} variants across diverse geographic zones of India.
-
-Methods: In a multi-regional cohort of {n_total:,} Indian patients, genotypes were determined and stratified across five geographic zones (South, North, East, West, and Central India) and biological sexes. Exact HWE tests, inbreeding coefficients (F_IS), Wright's fixation index (F_ST), and 2,000-iteration Monte Carlo permutation tests were conducted. Clinical phenotypes were assigned per CPIC guidelines.
-
-Results: Observed minor allele frequencies were {al_summary_str}, demonstrating high concordance with 1000 Genomes South Asian (SAS) genomic reference standards. Genotype distributions strictly adhered to Hardy–Weinberg equilibrium across the national cohort and within all regional subgroups (all exact p > 0.50), with inbreeding coefficients near zero. Wright's fixation index was F_ST = {avg_fst:.5f} (<0.001) and global multi-region omnibus heterogeneity testing showed no significant regional divergence (p > 0.90), establishing pan-Indian genetic conservation. Pairwise linkage disequilibrium confirmed independent allelic segregation (r² = {ld_r2:.4f}). Overall, {act_pct_ov:.1f}% of patients ({act_count_ov}/{n_total:,}) carried reduced-function alleles classified as Intermediate or Poor Metabolizers requiring preemptive dose reductions.
-
-Conclusion: In one of the largest pan-Indian pharmacogenomic analyses of {active_gene}, variant frequencies are geographically homogeneous across the Indian subcontinent. The high prevalence of actionable metabolizers ({act_pct_ov:.1f}%) combined with negligible regional differentiation (F_ST < 0.001) provides strong scientific justification for adopting a unified, nationwide CPIC pharmacogenomic implementation guideline."""
-
-    st.markdown(
-        f"""
-    <div style="background: #F8FAFC; border: 1.5px solid #3B82F6; border-radius: 8px; padding: 18px 20px; line-height: 1.6;">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-            <div style="font-weight: 800; color: #1E40AF; font-size: 15px;">📄 Comprehensive Study Summary (STREGA & CPIC Standard)</div>
-            <div style="font-size: 11px; background: #DBEAFE; color: #1D4ED8; padding: 3px 8px; border-radius: 4px; font-weight: 700;">Copy-Paste Ready</div>
-        </div>
-        <div style="font-size: 13px; color: #1E293B; white-space: pre-line; background: #FFFFFF; border: 1px solid #E2E8F0; padding: 14px 16px; border-radius: 6px; font-family: inherit;">
-{abstract_text}
-        </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
 
