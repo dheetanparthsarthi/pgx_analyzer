@@ -92,6 +92,35 @@ def render_genotype_allele(
                     'FREQUENCY': f"{a_p.get(k, 0):.1f}%"
                 } for k, v in a_c.items()]
                 st.table(pd.DataFrame(al_rows))
+
+                # Dominant / Carrier Model (Collapses sparse homozygotes for robust statistical reporting)
+                from core.stats import GeneticStatsEngine
+                wt_call = GeneticStatsEngine._normalize_genotype_call(active_snp_conf.get(snp_code, {}).get('wildtype_genotype', ''))
+                c_wt = int(g_c.get(wt_call, 0))
+                c_carrier = max(0, v_cnt - c_wt)
+                carrier_pct = (c_carrier / v_cnt * 100.0) if v_cnt > 0 else 0.0
+                wt_pct = (c_wt / v_cnt * 100.0) if v_cnt > 0 else 0.0
+                low_ci, up_ci = GeneticStatsEngine.calculate_wilson_ci(c_carrier, v_cnt)
+
+                carrier_rows = [
+                    {
+                        'GENETIC MODEL': f'Wildtype Non-Carrier ({wt_call})',
+                        'CLASSIFICATION': 'Reference (*1/*1)',
+                        'COUNT': c_wt,
+                        'PERCENTAGE': f'{wt_pct:.1f}%',
+                        'WILSON 95% CI': f'[{max(0.0, 100.0-up_ci*100):.1f}% – {min(100.0, 100.0-low_ci*100):.1f}%]'
+                    },
+                    {
+                        'GENETIC MODEL': 'Variant Carrier (Dominant Model)',
+                        'CLASSIFICATION': 'Heterozygous + Homozygous Variant',
+                        'COUNT': c_carrier,
+                        'PERCENTAGE': f'{carrier_pct:.1f}%',
+                        'WILSON 95% CI': f'[{low_ci*100:.1f}% – {up_ci*100:.1f}%]'
+                    }
+                ]
+                st.caption("🧬 **Dominant (Carrier) Model** *(Recommended for Rare Allele Analysis & STREGA Guidelines)*:")
+                st.table(pd.DataFrame(carrier_rows))
+
                 
             with c_fig:
                 fig_rows = [{'Genotype': str(k), 'Count': int(v)} for k, v in g_c.items() if v > 0]

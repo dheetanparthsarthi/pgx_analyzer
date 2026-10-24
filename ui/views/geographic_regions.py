@@ -339,6 +339,17 @@ def render_geographic_regions(
                     .get("hwe", {})
                     .get("p_value", 1.0),
                 ),
+                (
+                    f"Carrier Count ({het_g} + {var_g})",
+                    lambda s: (
+                        s.get(snp_key, {}).get("genotype_counts", {}).get(het_g, 0)
+                        + s.get(snp_key, {}).get("genotype_counts", {}).get(var_g, 0)
+                    ),
+                ),
+                (
+                    "Carrier Frequency (%)",
+                    lambda s: f"{(s.get(snp_key, {}).get('genotype_counts', {}).get(het_g, 0) + s.get(snp_key, {}).get('genotype_counts', {}).get(var_g, 0)) / max(1, sum(s.get(snp_key, {}).get('genotype_counts', {}).values())) * 100.0:.1f}%",
+                ),
             ]
 
         m_matrix = []
