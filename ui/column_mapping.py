@@ -1,12 +1,20 @@
 """Step 3 Column Mapping component."""
 
+from collections import Counter
 import re
 import numpy as np
 import pandas as pd
 import streamlit as st
 from config import SNP_CONFIG, CYP2C9_SNP_CONFIG
-from marker_catalog import load_marker_catalog, get_default_markers_for_gene, find_best_column_match
+from marker_catalog import (
+    detect_genes_in_columns,
+    find_best_column_match,
+    get_column_gene,
+    get_default_markers_for_gene,
+    load_marker_catalog,
+)
 from ui.session_manager import save_active_dataset, save_active_session, set_active_target_gene
+
 
 def render_column_mapping(df_raw: pd.DataFrame) -> None:
     """Render Step 3: Map Columns, allele configuration, and permitted genotypes."""
