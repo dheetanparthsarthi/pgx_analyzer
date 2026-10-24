@@ -232,3 +232,317 @@ class GeneticStatsEngine:
                 'interpretation': interpretation
             }
         }
+
+    @staticmethod
+    def calculate_odds_ratio_haldane(a: int, b: int, c: int, d: int) -> Dict[str, Any]:
+        """
+        Calculate Haldane-Anscombe corrected Odds Ratio, 95% Confidence Interval (Woolf logit),
+        and Fisher's Exact Test two-sided P-value for a 2x2 contingency table:
+            [[a, b],
+             [c, d]]
+        Haldane correction adds 0.5 to all cells if any cell is 0 to avoid division by zero
+        and reduce small-sample bias.
+        """
+        table_raw = [[a, b], [c, d]]
+        try:
+            _, fisher_p = stats.fisher_exact(table_raw)
+        except Exception:
+            fisher_p = 1.0
+
+        haldane_applied = (a == 0 or b == 0 or c == 0 or d == 0)
+        adj_a = a + (0.5 if haldane_applied else 0.0)
+        adj_b = b + (0.5 if haldane_applied else 0.0)
+        adj_c = c + (0.5 if haldane_applied else 0.0)
+        adj_d = d + (0.5 if haldane_applied else 0.0)
+
+        if adj_b * adj_c == 0:
+            or_val = 1.0
+            se_ln_or = 0.0
+            ci_lower = 0.0
+            ci_upper = float('inf')
+        else:
+            or_val = (adj_a * adj_d) / (adj_b * adj_c)
+            se_ln_or = math.sqrt((1.0 / adj_a) + (1.0 / adj_b) + (1.0 / adj_c) + (1.0 / adj_d))
+            ci_lower = math.exp(math.log(or_val) - 1.96 * se_ln_or)
+            ci_upper = math.exp(math.log(or_val) + 1.96 * se_ln_or)
+
+        return {
+            'odds_ratio': round(or_val, 3),
+            'ci_lower': round(ci_lower, 3),
+            'ci_upper': round(ci_upper, 3),
+            'p_value': round(fisher_p, 4),
+            'se': round(se_ln_or, 4),
+            'haldane_applied': haldane_applied,
+            'table': table_raw
+        }
+
+    @staticmethod
+    def calculate_wilson_ci(k: int, n: int, confidence: float = 0.95) -> Tuple[float, float]:
+        """
+        Calculate Wilson Score confidence interval for a binomial proportion k/n.
+        Essential for rare allele frequencies where Wald normal approximation fails.
+        """
+        if n <= 0:
+            return 0.0, 0.0
+        p = k / n
+        z = stats.norm.ppf(1.0 - (1.0 - confidence) / 2.0)
+        z2 = z ** 2
+        denominator = 1.0 + (z2 / n)
+        center = (p + (z2 / (2.0 * n))) / denominator
+        half_width = (z / denominator) * math.sqrt((p * (1.0 - p) / n) + (z2 / (4.0 * (n ** 2))))
+        lower = max(0.0, center - half_width)
+        upper = min(1.0, center + half_width)
+        return round(lower, 4), round(upper, 4)
+
+    @staticmethod
+    def calculate_fst(subgroup_counts: Dict[str, Dict[str, int]]) -> Dict[str, Any]:
+        """
+        Calculate Wright's Fixation Index (F_ST) across subpopulations for a biallelic marker.
+        subgroup_counts: {subgroup_name: {ref_allele: count, var_allele: count}}
+        F_ST = (H_T - H_S) / H_T, measuring population genetic substructure.
+        F_ST < 0.05 indicates little genetic differentiation (pan-Indian homogeneity).
+        """
+        valid_groups = {
+            k: v for k, v in subgroup_counts.items()
+            if sum(v.values()) > 0
+        }
+        if len(valid_groups) < 2:
+            return {'fst': 0.0, 'interpretation': 'Insufficient subgroups (>=2 required)', 'h_s': 0.0, 'h_t': 0.0}
+
+        total_var = 0
+        total_alleles = 0
+        sub_props = []
+        sub_weights = []
+
+        for grp, counts in valid_groups.items():
+            ref_c = list(counts.values())[0] if len(counts) > 0 else 0
+            var_c = list(counts.values())[1] if len(counts) > 1 else 0
+            tot_sub = ref_c + var_c
+            if tot_sub > 0:
+                p_sub = var_c / tot_sub
+                sub_props.append(p_sub)
+                sub_weights.append(tot_sub)
+                total_var += var_c
+                total_alleles += tot_sub
+
+        if total_alleles == 0:
+            return {'fst': 0.0, 'interpretation': 'No allele data', 'h_s': 0.0, 'h_t': 0.0}
+
+        # Subpopulation expected heterozygosity H_S = sum(w_i * 2 * p_i * (1 - p_i))
+        h_s = sum(
+            (w / total_alleles) * (2.0 * p_i * (1.0 - p_i))
+            for p_i, w in zip(sub_props, sub_weights)
+        )
+
+        # Total expected heterozygosity H_T = 2 * p_total * (1 - p_total)
+        p_total = total_var / total_alleles
+        h_t = 2.0 * p_total * (1.0 - p_total)
+
+        if h_t <= 0.0:
+            fst = 0.0
+            interp = "Monomorphic marker across all populations"
+        else:
+            fst = max(0.0, (h_t - h_s) / h_t)
+            if fst < 0.005:
+                interp = "Very low differentiation (<0.005) - Uniform pan-population genetic homogeneity"
+            elif fst < 0.05:
+                interp = "Low genetic differentiation (<0.05) - Consistent with single gene pool"
+            elif fst < 0.15:
+                interp = "Moderate genetic differentiation (0.05 - 0.15)"
+            else:
+                interp = "High genetic differentiation (>=0.15)"
+
+        return {
+            'fst': round(fst, 5),
+            'h_s': round(h_s, 5),
+            'h_t': round(h_t, 5),
+            'total_alleles': total_alleles,
+            'subgroups_analyzed': len(valid_groups),
+            'interpretation': interp
+        }
+
+    @staticmethod
+    def calculate_statistical_power(n1: int, n2: int, p1: float, p2: float, alpha: float = 0.05) -> float:
+        """
+        Calculate post-hoc statistical power for comparing two proportions (two-sided z-test).
+        Used to assess whether small cohorts (e.g. Central India N=7) had adequate power.
+        """
+        if n1 <= 0 or n2 <= 0:
+            return 0.0
+        if p1 == p2:
+            return alpha
+
+        p_pool = (n1 * p1 + n2 * p2) / (n1 + n2)
+        se0 = math.sqrt(max(1e-9, p_pool * (1.0 - p_pool) * ((1.0 / n1) + (1.0 / n2))))
+        se1 = math.sqrt(max(1e-9, (p1 * (1.0 - p1) / n1) + (p2 * (1.0 - p2) / n2)))
+
+        z_alpha = stats.norm.ppf(1.0 - alpha / 2.0)
+        z_beta = (abs(p1 - p2) - z_alpha * se0) / se1
+        power = float(stats.norm.cdf(z_beta))
+        return round(max(0.0, min(1.0, power)), 4)
+
+    @classmethod
+    def calculate_linkage_disequilibrium(
+        cls,
+        df: pd.DataFrame,
+        marker1: str,
+        marker2: str,
+        custom_info1: Optional[Dict] = None,
+        custom_info2: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate Linkage Disequilibrium (D, D', r, r^2) between two biallelic markers.
+        Demonstrates whether markers (e.g. CYP2C9*2 and *3) segregate independently.
+        """
+        if marker1 not in df.columns or marker2 not in df.columns:
+            return {'error': f"Markers {marker1} or {marker2} not found in dataset."}
+
+        s1 = df[marker1].dropna().map(cls._normalize_genotype_call)
+        s2 = df[marker2].dropna().map(cls._normalize_genotype_call)
+
+        valid_idx = s1[~s1.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING'])].index.intersection(
+            s2[~s2.isin(['', 'NAN', 'NONE', 'NULL', 'NA', '?', 'MISSING'])].index
+        )
+        if len(valid_idx) == 0:
+            return {'error': "No overlapping valid samples between markers."}
+
+        # Encode dosage (0 = homozygous ref, 1 = het, 2 = hom var)
+        all_configs = {**SNP_CONFIG, **CYP2C9_SNP_CONFIG}
+        info1 = custom_info1 or all_configs.get(marker1, {})
+        info2 = custom_info2 or all_configs.get(marker2, {})
+
+        wt1 = cls._normalize_genotype_call(info1.get('wildtype_genotype', ''))
+        het1 = cls._normalize_genotype_call(info1.get('het_genotype', ''))
+        var1 = cls._normalize_genotype_call(info1.get('hom_var_genotype', ''))
+
+        wt2 = cls._normalize_genotype_call(info2.get('wildtype_genotype', ''))
+        het2 = cls._normalize_genotype_call(info2.get('het_genotype', ''))
+        var2 = cls._normalize_genotype_call(info2.get('hom_var_genotype', ''))
+
+        def get_dosage(call, wt, het, var):
+            if call == wt: return 0
+            if call == het: return 1
+            if call == var: return 2
+            return None
+
+        dosages1 = []
+        dosages2 = []
+        for idx in valid_idx:
+            d1 = get_dosage(s1.loc[idx], wt1, het1, var1)
+            d2 = get_dosage(s2.loc[idx], wt2, het2, var2)
+            if d1 is not None and d2 is not None:
+                dosages1.append(d1)
+                dosages2.append(d2)
+
+        n_samples = len(dosages1)
+        if n_samples < 5:
+            return {'error': "Insufficient valid sample pairs (<5)."}
+
+        # Pearson correlation r between dosage vectors
+        arr1 = np.array(dosages1, dtype=float)
+        arr2 = np.array(dosages2, dtype=float)
+
+        std1 = np.std(arr1)
+        std2 = np.std(arr2)
+
+        if std1 == 0 or std2 == 0:
+            r = 0.0
+            r2 = 0.0
+            chi2_stat = 0.0
+            p_val = 1.0
+            d_val = 0.0
+            d_prime = 0.0
+        else:
+            r, _ = stats.pearsonr(arr1, arr2)
+            r2 = r ** 2
+            chi2_stat = n_samples * r2
+            p_val = stats.chi2.sf(chi2_stat, df=1)
+
+            # Allele frequencies
+            p_a = np.mean(arr1) / 2.0
+            p_b = np.mean(arr2) / 2.0
+            # Covariance approximation for D: Cov(X1, X2) / 2
+            cov = np.cov(arr1, arr2)[0, 1]
+            d_val = cov / 2.0
+
+            # D_prime = D / D_max
+            if d_val >= 0:
+                d_max = min(p_a * (1.0 - p_b), (1.0 - p_a) * p_b)
+            else:
+                d_max = min(p_a * p_b, (1.0 - p_a) * (1.0 - p_b))
+
+            d_prime = (d_val / d_max) if d_max > 0 else 0.0
+            d_prime = max(-1.0, min(1.0, d_prime))
+
+        return {
+            'marker1': marker1,
+            'marker2': marker2,
+            'samples_analyzed': n_samples,
+            'r': round(r, 4),
+            'r2': round(r2, 4),
+            'd': round(d_val, 5),
+            'd_prime': round(d_prime, 4),
+            'chi2_stat': round(chi2_stat, 4),
+            'p_value': round(p_val, 4),
+            'interpretation': (
+                "Independent segregation (No Linkage Disequilibrium, r^2 ~ 0)"
+                if r2 < 0.1 else (
+                    "Moderate Linkage Disequilibrium"
+                    if r2 < 0.8 else "Strong Linkage Disequilibrium (Co-inherited)"
+                )
+            )
+        }
+
+    @staticmethod
+    def calculate_monte_carlo_chi2(contingency_table: np.ndarray, n_sim: int = 2000, seed: int = 42) -> Dict[str, Any]:
+        """
+        Monte Carlo simulated Chi-square test for R x C contingency tables with sparse cells (<5).
+        Permutes row and column marginals to estimate the empirical null distribution.
+        """
+        table = np.array(contingency_table, dtype=float)
+        row_sums = table.sum(axis=1)
+        col_sums = table.sum(axis=0)
+        total = table.sum()
+
+        if total == 0 or len(row_sums) < 2 or len(col_sums) < 2:
+            return {'chi2': 0.0, 'p_asymptotic': 1.0, 'p_monte_carlo': 1.0, 'cochran_warning': False}
+
+        # Expected counts under independence
+        expected = np.outer(row_sums, col_sums) / total
+        low_cells = (expected < 5).sum()
+        cochran_violated = (low_cells / expected.size) > 0.20
+
+        # Observed Chi2 statistic
+        with np.errstate(divide='ignore', invalid='ignore'):
+            chi2_cells = np.where(expected > 0, ((table - expected) ** 2) / expected, 0.0)
+            obs_chi2 = np.sum(chi2_cells)
+
+        dof = (table.shape[0] - 1) * (table.shape[1] - 1)
+        p_asymp = stats.chi2.sf(obs_chi2, df=dof) if dof > 0 else 1.0
+
+        # Monte Carlo permutation
+        rng = np.random.default_rng(seed)
+        sim_chi2 = []
+        p_col = col_sums / total
+        for _ in range(n_sim):
+            sim_table = np.zeros_like(table)
+            for i, r_sum in enumerate(row_sums):
+                if r_sum > 0:
+                    sim_table[i] = rng.multinomial(int(r_sum), p_col)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                sim_stat = np.sum(np.where(expected > 0, ((sim_table - expected) ** 2) / expected, 0.0))
+                sim_chi2.append(sim_stat)
+
+        p_mc = float(np.mean(np.array(sim_chi2) >= obs_chi2))
+
+        return {
+            'chi2_stat': round(float(obs_chi2), 4),
+            'df': int(dof),
+            'p_asymptotic': round(float(p_asymp), 4),
+            'p_monte_carlo': round(float(p_mc), 4),
+            'expected_counts': np.round(expected, 2).tolist(),
+            'cells_below_5': int(low_cells),
+            'pct_cells_below_5': round(float((low_cells / expected.size) * 100), 1),
+            'cochran_violated': cochran_violated
+        }
+

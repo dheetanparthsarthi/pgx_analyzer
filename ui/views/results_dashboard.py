@@ -28,6 +28,8 @@ from ui.views.hardy_weinberg import render_hardy_weinberg
 from ui.views.population_groups import render_population_groups
 from ui.views.quality_audit import render_quality_audit
 from ui.views.state_profiles import render_state_profiles
+from ui.views.statistical_validation import render_statistical_validation
+
 
 logger = logging.getLogger(__name__)
 
@@ -179,10 +181,11 @@ def render_results_dashboard(
             active_gene, catalog_df=load_marker_catalog()
         )
 
-    # 10 Main Tabs Consolidating All Analysis Views & Comparison Studio
+    # 11 Main Tabs Consolidating All Analysis Views, Statistical Validation & Comparison Studio
     (
         tab_overview,
         tab_gen,
+        tab_stat,
         tab_comparison,
         tab_hwe,
         tab_pop,
@@ -195,6 +198,7 @@ def render_results_dashboard(
         [
             "📊 Executive Overview",
             "🧬 Genotype & Allele",
+            "📈 Statistical Validation",
             "⚖️ Geographic & State Comparison",
             "⚖️ Hardy-Weinberg",
             "🌐 Population Stratification",
@@ -303,7 +307,16 @@ def render_results_dashboard(
             render_subcohort_pills,
         )
 
-    # 3. Hardy-Weinberg
+    # 3. Advanced Statistical Validation
+    with tab_stat:
+        render_statistical_validation(
+            full_results,
+            active_gene,
+            active_markers,
+            processed_df,
+        )
+
+    # 4. Hardy-Weinberg
     with tab_hwe:
         render_hardy_weinberg(render_subcohort_pills)
 
