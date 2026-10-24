@@ -229,6 +229,7 @@ class GeneticStatsEngine:
                 'p_value': round(p_val, 4),
                 'decision_p_value': round(final_p, 4),
                 'exact_p_value': round(exact_p_val, 4),
+                'inbreeding_coeff': round(1.0 - (c_het / exp_het), 4) if exp_het > 0 else 0.0,
                 'interpretation': interpretation
             }
         }

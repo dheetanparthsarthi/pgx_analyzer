@@ -318,7 +318,8 @@ def render_results_dashboard(
 
     # 4. Hardy-Weinberg
     with tab_hwe:
-        render_hardy_weinberg(render_subcohort_pills)
+        render_hardy_weinberg(render_subcohort_pills, full_results=full_results)
+
 
     # 4. Population Stratification
     with tab_pop:
